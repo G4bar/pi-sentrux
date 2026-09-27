@@ -1,45 +1,37 @@
 # pi-sentrux
 
-Sentrux architecture-quality tools (Quality Signal, rules, gate, session diff) for the [pi coding agent](https://github.com/earendil-works/pi).
+Give your pi agent an architecture sensor — measure quality, catch cycles and boundary violations, and stop regressions before they merge.
 
 > [!NOTE]
 > This is an **unofficial** pi extension. It wraps the Sentrux CLI and MCP server **without modifying them** and is not affiliated with or endorsed by Sentrux.
 
-## About Sentrux
+## What is Sentrux?
 
-[Sentrux](https://github.com/sentrux/sentrux) ([website](https://sentrux.dev/), [docs](https://sentrux.dev/docs/quick-start/)) is a real-time architectural sensor for AI coding agents: a pure-Rust single binary (CLI + MCP server) covering 52 languages via tree-sitter plugins.
+[Sentrux](https://github.com/sentrux/sentrux) ([website](https://sentrux.dev/), [docs](https://sentrux.dev/docs/quick-start/)) measures a codebase's architecture as a **Quality Signal from 0–10000** — the geometric mean of five root-cause scores ([docs](https://sentrux.dev/docs/quality-signal/)): **modularity, acyclicity, depth, equality, and redundancy**. It also reports dependency **cycles** and checks **layer and boundary rules** (`rules.toml`). It is a pure-Rust single binary (CLI + MCP server) covering 52 languages via tree-sitter plugins.
 
-It reports a **Quality Signal from 0–10000** — the geometric mean of five normalized root-cause scores, scaled ×10000. The five root causes are **modularity, acyclicity, depth, equality, and redundancy** (see [quality-signal docs](https://sentrux.dev/docs/quality-signal/)).
+Sentrux is by the [sentrux organization](https://github.com/sentrux/sentrux) (copyright holder "Sentrux" in its `LICENSE`) and is released under the **MIT license**. This extension targets Sentrux **v0.5.7**. Sentrux's own first-run grammar download and daily telemetry ping apply when you use it — see [Network and telemetry](#network-and-telemetry) and opt out with `/sentrux telemetry-off`.
 
-Sentrux is by the [sentrux organization](https://github.com/sentrux/sentrux) (copyright holder "Sentrux" in its `LICENSE`) and is released under the **MIT license**. This extension targets Sentrux **v0.5.7** (the latest release). Sentrux's own first-run grammar download and daily telemetry ping apply when you use it — see [Network and telemetry](#network-and-telemetry) and opt out with `/sentrux telemetry-off`.
+## What does this extension do?
 
-> [!WARNING]
-> Never run bare `sentrux`, `sentrux <path>`, or `sentrux scan` — they open a GUI. All Sentrux invocations go through this package's allowlisted `check` / `gate` / `mcp` / `--version` arguments.
+It gives the pi agent five `sentrux_*` tools: **measure** quality, **check** layer and boundary rules, **gate** against a saved baseline, **compare** a session before and after a change, and get **insights** (DSM, test gaps, git stats). It also adds a `/sentrux` command (`status`, `install`, `restart`, `telemetry-off`), a `sentrux` skill that teaches the agent a measure → fix → remeasure loop, and an opt-in `agent_end` nudge that surfaces quality drops on the next turn.
 
-Pinned to **v0.5.7**: versions below 0.5.0 are rejected, and any version other than 0.5.7 logs a warning ("parsers verified for 0.5.7").
+## Quick start
 
-## Features
-
-- Five `sentrux_*` tools: scan, check-rules, gate, session, and insights.
-- `/sentrux` subcommands: `status`, `install`, `restart`, `telemetry-off`.
-- A `sentrux` skill playbook (`measure → fix → remeasure`, `rules.toml` reference).
-- Opt-in `agent_end` nudge that surfaces quality drops on the next turn.
-
-## Prerequisites
-
-- Node `>=22.19.0` and the pi coding agent (`0.87.1` is the dev dependency; host peer dependencies are `"*"`).
-- A Sentrux binary, resolved in this order: `SENTRUX_BIN` → global config `binaryPath` → `PATH` → managed install at `<agentDir>/pi-sentrux/bin/`. A project config may never set `binaryPath`.
-- Nothing is downloaded automatically.
-
-## Install
-
-Install the extension from npm:
+Requires Node `>=22.19.0` and the pi coding agent. Nothing is downloaded automatically.
 
 ```sh
 pi install npm:pi-sentrux
 ```
 
-Or from GitHub (append `@v0.1.0` to either form to pin a version):
+Then, if you have no Sentrux binary yet, inside pi run:
+
+```text
+/sentrux install
+```
+
+It downloads the pinned v0.5.7 asset for your platform over HTTPS and verifies its sha256 before installing. Alternatives: `brew install sentrux/tap/sentrux` (macOS arm64 and Linux x86_64 only) or set `SENTRUX_BIN`. The binary is resolved as `SENTRUX_BIN` → global config `binaryPath` → `PATH` → managed install at `<agentDir>/pi-sentrux/bin/`. A project config may never set `binaryPath`.
+
+Other install forms (append `@v0.1.0` to pin a version):
 
 ```sh
 pi install git:github.com/G4bar/pi-sentrux
@@ -51,7 +43,19 @@ For local use:
 pi -e /path/to/pi-sentrux
 ```
 
-Then, if you have no Sentrux binary yet, run `/sentrux install`. It is opt-in, downloads the pinned v0.5.7 asset for your platform over HTTPS, and verifies its sha256 before installing. Alternatives: `brew install sentrux/tap/sentrux` (macOS arm64 and Linux x86_64 only) or set `SENTRUX_BIN`.
+Then just ask the agent:
+
+> Check the architecture of this repo with sentrux
+
+## Example: what the agent sees
+
+Real output shape (values from test fixtures):
+
+```text
+Sentrux quality 4674/10000 — bottleneck: redundancy  (root /abs/repo)
+modularity 3526 (Q=0.0289) · acyclicity 5000 (cycles=1) · depth 8889 (max depth=1) · equality 4271 (Gini=0.573) · redundancy 3333 (ratio=0.667)
+sentrux check: PASS (4 rules checked) · quality 4674
+```
 
 ## Tools
 
@@ -129,13 +133,14 @@ Sentrux has network side effects this package does not hide — a first-run gram
 
 ## Limitations
 
+- Pinned to **v0.5.7**: versions below 0.5.0 are rejected, and any version other than 0.5.7 logs a warning ("parsers verified for 0.5.7").
+- Never run bare `sentrux`, `sentrux <path>`, or `sentrux scan` yourself — they open a GUI. This package only ever invokes the allowlisted `check` / `gate` / `mcp` / `--version` arguments.
 - Output formats are human text pinned to v0.5.7 fixtures; parsers fail loudly (throw with a capped stderr/stdout tail) on anything else.
 - Exit code 1 means both "violations/degraded" and "error" — classification trusts the parsed stdout summary regardless of the exit code; a run the parser cannot recognise throws with a capped stderr tail plus a stdout tail.
 - Scans cannot be cancelled: abort/timeout kills the server and loses the session baseline (`session end` then returns `lost`).
 - `session_end` re-scans the server's own `scan_root` — one server per root.
 - New files are invisible until `git add -N`; the tools never stage anything.
 - The bundled grammar tarball is not checksum-pinned by us.
-- Publishing needs explicit user approval.
 
 ## Development
 
