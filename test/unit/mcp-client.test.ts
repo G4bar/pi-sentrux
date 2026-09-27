@@ -99,10 +99,12 @@ describe("McpClient", () => {
     expect(client.isAlive).toBe(false);
   });
 
-  it("a stdin EPIPE on a dying child routes to child-down instead of throwing", async () => {
+  it("a stdin EPIPE on a dying child routes to child-down, kills the process, and respawns on the next call", async () => {
     const client = track(makeClient());
     await client.start();
     expect(client.isAlive).toBe(true);
+    const oldPid = client.pid;
+    expect(oldPid).toBeGreaterThan(0);
 
     // An async stdin failure arrives as an 'error' event the write try/catch cannot
     // catch; without the stdin error listener this would throw uncaught. Emit one directly.
@@ -110,11 +112,24 @@ describe("McpClient", () => {
     child.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
     expect(client.isAlive).toBe(false);
 
+    // The broken-stdin process is killed, not orphaned: it must actually exit.
+    const start = Date.now();
+    while (Date.now() - start < 5000) {
+      try {
+        process.kill(oldPid!, 0);
+      } catch {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(() => process.kill(oldPid!, 0)).toThrow();
+
     // The client recovers: the next call respawns the server with generation+1.
     const health = await client.callTool<{ quality_signal: number }>("health", {});
     expect(health.quality_signal).toBe(4674);
     expect(client.generation).toBe(1);
     expect(client.isAlive).toBe(true);
+    expect(client.pid).not.toBe(oldPid);
   });
 
   it("close() during start leaves no spawned process behind", async () => {

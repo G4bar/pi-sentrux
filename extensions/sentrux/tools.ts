@@ -22,6 +22,7 @@ import {
   capThrownMessage,
   formatDsm,
   formatGitStats,
+  formatNum,
   formatScanHealth,
   formatSessionEnd,
   formatTestGaps,
@@ -142,7 +143,7 @@ const CheckRulesParams = Type.Object(
         minimum: 1,
         maximum: 200,
         default: 20,
-        description: "Maximum files listed per violation in the returned text before truncating to '... N more files'.",
+        description: "Maximum file/edge lines listed per rule in the returned text before truncating to '... N more'.",
       }),
     ),
   },
@@ -158,12 +159,52 @@ export interface CheckRulesDetails {
   violations: CheckViolation[];
 }
 
-function formatViolationForModel(v: CheckViolation, maxFiles: number): string {
-  const lines = [`✗ [${v.severity}] ${v.rule}: ${v.message}`];
-  const shown = v.files.slice(0, maxFiles);
-  for (const f of shown) lines.push(`    ${f}`);
-  if (v.files.length > maxFiles) lines.push(`    … ${v.files.length - maxFiles} more files`);
+/** One compact line for a violation whose message differs from its rule siblings
+ * (the per-edge layer_direction/boundary case): a file pair becomes `from → to`;
+ * anything else keeps its message so no information is lost. */
+function compactViolationEdge(v: CheckViolation): string {
+  if (v.files.length === 2) return `${v.files[0]} → ${v.files[1]}`;
+  if (v.files.length === 1) return `${v.message} — ${v.files[0]}`;
+  if (v.files.length === 0) return v.message;
+  return `${v.message} (${v.files.length} files)`;
+}
+
+/** Groups one rule's violations under a single counted header. A shared message is
+ * shown once with every file listed; per-edge messages collapse to one compact
+ * line each. Edge/file lines are capped per rule (`… N more`) so a 57-violation
+ * run stays well under the output budget. The full parsed array stays in details. */
+function formatRuleGroupForModel(rule: string, violations: CheckViolation[], maxLines: number): string {
+  const count = violations.length;
+  const severities = [...new Set(violations.map((v) => v.severity))];
+  const messages = [...new Set(violations.map((v) => v.message))];
+  const noun = count === 1 ? "violation" : "violations";
+  const lines = [
+    messages.length === 1
+      ? `✗ [${severities.join("/")}] ${rule} (${count} ${noun}): ${messages[0]}`
+      : `✗ [${severities.join("/")}] ${rule} (${count} ${noun})`,
+  ];
+  if (messages.length === 1) {
+    const files = violations.flatMap((v) => v.files);
+    const shown = files.slice(0, maxLines);
+    for (const f of shown) lines.push(`    ${f}`);
+    if (files.length > maxLines) lines.push(`    … ${files.length - maxLines} more`);
+  } else {
+    const shown = violations.slice(0, maxLines);
+    for (const v of shown) lines.push(`    ${compactViolationEdge(v)}`);
+    if (violations.length > maxLines) lines.push(`    … ${violations.length - maxLines} more`);
+  }
   return lines.join("\n");
+}
+
+/** Aggregates parsed violations by rule (first-seen order) into counted groups. */
+function groupViolationsByRule(violations: CheckViolation[]): { rule: string; violations: CheckViolation[] }[] {
+  const groups = new Map<string, CheckViolation[]>();
+  for (const v of violations) {
+    const list = groups.get(v.rule);
+    if (list) list.push(v);
+    else groups.set(v.rule, [v]);
+  }
+  return [...groups.entries()].map(([rule, vs]) => ({ rule, violations: vs }));
 }
 
 export function registerCheckRulesTool(pi: ExtensionAPI, deps: SentruxToolDeps): void {
@@ -186,10 +227,10 @@ export function registerCheckRulesTool(pi: ExtensionAPI, deps: SentruxToolDeps):
 
       if (!(await pathExists(rulesPath))) {
         const lines = [
+          ...(warning ? [warning] : []),
           "sentrux check: no .sentrux/rules.toml found — create one to define architecture rules.",
           "See the sentrux skill for the rules.toml keys and a starter template.",
         ];
-        if (warning) lines.push(warning);
         const details: CheckRulesDetails = {
           root,
           binary: { path: binaryStatus.path, version: formatVersion(binaryStatus.version) },
@@ -232,13 +273,13 @@ export function registerCheckRulesTool(pi: ExtensionAPI, deps: SentruxToolDeps):
       const violationCount = outcome.kind === "fail" ? outcome.violationCount : violations.length;
 
       const lines: string[] = [];
+      if (warning) lines.push(warning);
       if (status === "pass") {
         lines.push(`sentrux check: PASS (${rulesChecked} rules checked) · quality ${quality}`);
       } else {
         lines.push(`sentrux check: FAIL — ${violationCount} violation(s) (${rulesChecked} rules checked) · quality ${quality}`);
-        for (const v of violations) lines.push(formatViolationForModel(v, maxFilesPerViolation));
+        for (const g of groupViolationsByRule(violations)) lines.push(formatRuleGroupForModel(g.rule, g.violations, maxFilesPerViolation));
       }
-      if (warning) lines.push(warning);
 
       const details: CheckRulesDetails = {
         root,
@@ -307,17 +348,17 @@ async function finishGateCompare(
 ): Promise<AgentToolResult<GateDetails>> {
   const label = status === "ok" ? "OK" : "DEGRADED";
   const lines = [
+    ...(warning ? [warning] : []),
     `sentrux gate: ${label} vs .sentrux/baseline.json`,
-    `quality ${outcome.quality.before} → ${outcome.quality.after} · coupling ${outcome.coupling.before} → ${outcome.coupling.after} · ` +
+    `quality ${outcome.quality.before} → ${outcome.quality.after} · coupling ${formatNum(outcome.coupling.before)} → ${formatNum(outcome.coupling.after)} (0–1 scale) · ` +
       `cycles ${outcome.cycles.before} → ${outcome.cycles.after} · god files ${outcome.godFiles.before} → ${outcome.godFiles.after}`,
   ];
   if (outcome.distance !== undefined) {
-    lines.push(`distance from main sequence: ${outcome.distance}`);
+    lines.push(`distance from main sequence: ${formatNum(outcome.distance)}`);
   }
   if (status === "degraded") {
-    lines.push(`reasons: ${outcome.reasons.join("; ")}`);
+    lines.push(`reasons (Sentrux 0–1 scale): ${outcome.reasons.join("; ")}`);
   }
-  if (warning) lines.push(warning);
 
   const details: GateDetails = {
     root,
@@ -381,8 +422,11 @@ export function registerGateTool(pi: ExtensionAPI, deps: SentruxToolDeps): void 
           throw new Error(`sentrux gate --save reported success but ${baselinePath} could not be read back: ${(err as Error).message}`);
         }
 
-        const lines = ["sentrux gate: saved baseline to .sentrux/baseline.json", `quality ${outcome.quality}`];
-        if (warning) lines.push(warning);
+        const lines = [
+          ...(warning ? [warning] : []),
+          "sentrux gate: saved baseline to .sentrux/baseline.json",
+          `quality ${outcome.quality}`,
+        ];
 
         const details: GateDetails = {
           root,
@@ -413,8 +457,10 @@ export function registerGateTool(pi: ExtensionAPI, deps: SentruxToolDeps): void 
         return finishGateCompare("degraded", outcome, root, binaryStatus, baselinePath, warning, config, toolCallId);
       }
       if (result.stderr.includes("Failed to load baseline at")) {
-        const lines = ["sentrux gate: no baseline found — call sentrux_gate save=true first"];
-        if (warning) lines.push(warning);
+        const lines = [
+          ...(warning ? [warning] : []),
+          "sentrux gate: no baseline found — call sentrux_gate save=true first",
+        ];
         const details: GateDetails = {
           root,
           binary: { path: binaryStatus.path, version: formatVersion(binaryStatus.version) },
@@ -478,8 +524,7 @@ export function registerScanTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps): vo
       }
       const warning = formatUntrackedWarning(untrackedFiles);
 
-      const lines = [formatScanHealth(root, scan, health)];
-      if (warning) lines.push(warning);
+      const lines = [warning, formatScanHealth(root, scan, health)].filter((l): l is string => l !== undefined);
 
       const details: SentruxScanDetails = {
         root,
@@ -554,10 +599,10 @@ export function registerSessionTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps):
       const warning = await untrackedWarningLine(root, config);
 
       const finish = async (lines: string[], details: SentruxSessionDetails): Promise<AgentToolResult<SentruxSessionDetails>> => {
-        if (warning) lines.push(warning);
+        const ordered = [...(warning ? [warning] : []), ...lines];
         const text = await buildModelText({
           toolCallId,
-          text: lines.join("\n"),
+          text: ordered.join("\n"),
           details,
           maxBytes: config.maxOutputBytes,
           maxLines: config.maxOutputLines,
@@ -673,7 +718,17 @@ export function registerInsightsTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps)
         const args: Record<string, unknown> = {};
         if (params.format !== undefined) args.format = params.format;
         const dsm = await client.callTool<DsmResult>("dsm", args, callOpts);
-        text = formatDsm(dsm);
+        // Best-effort cycle count for the clean-layering note: a health failure
+        // must not lose the dsm result itself.
+        let cycles: number | undefined;
+        try {
+          const health = await client.callTool<HealthResult>("health", {}, callOpts);
+          const raw = health.root_causes?.acyclicity?.raw;
+          if (typeof raw === "number") cycles = raw;
+        } catch {
+          cycles = undefined;
+        }
+        text = formatDsm(dsm, { cycles });
         result = dsm;
       } else if (params.kind === "test_gaps") {
         const args: Record<string, unknown> = {};
@@ -689,8 +744,7 @@ export function registerInsightsTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps)
         result = gitStats;
       }
 
-      const lines = [text];
-      if (warning) lines.push(warning);
+      const lines = [warning, text].filter((l): l is string => l !== undefined);
 
       // SAFETY: TypeBox's Static<> widens a StringEnum-typed object property to `string`
       // (typebox 1.3.27); the tool's runtime schema validation already restricts params.kind

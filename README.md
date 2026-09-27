@@ -87,14 +87,19 @@ project's `.pi/sentrux.json` may additionally set a restricted subset.
 
 All five tools warn about untracked files (Sentrux reads `git ls-files`;
 `git add -N` is enough for a new file to be scanned) and never change git
-state.
+state. The warning leads the model text — output truncation drops the tail,
+so leading with it guarantees the model still sees it — and `.sentrux/`
+config paths are excluded from it.
 
 - `sentrux_scan` — Quality Signal 0–10000, bottleneck, all five root-cause
   scores with raw values, and size counts. One focused change per scan; every
   call rescans the whole tree.
 - `sentrux_check_rules` — runs `sentrux check` (read-only, all rules, no tier
   cap). `[[boundaries]]` violations are reported **only** here — the MCP
-  `check_rules` view silently drops them.
+  `check_rules` view silently drops them. Violations are grouped per rule
+  with a count; per-edge layer/boundary violations collapse to compact
+  `from → to` lines capped per rule (`… N more`), so even dozens of
+  violations fit the output budget (full list stays in details).
 - `sentrux_gate` — on-disk regression gate in `.sentrux/baseline.json`:
   `save=true` writes the baseline; `save=false` reports `ok` / `degraded` /
   `no_baseline`. Degraded: quality drops >200 points, coupling rises >0.05,
@@ -106,7 +111,13 @@ state.
   `lost` with instructions).
 - `sentrux_insights` — `dsm` / `test_gaps` / `git_stats` summaries. Free tier
   returns summary counts only (`dsm` clusters included; only the ASCII matrix
-  is Pro-gated).
+  is Pro-gated). When health reports import cycles while Sentrux's own `dsm`
+  interpretation still claims clean layering, a note says so.
+
+Scales: quality and root-cause scores print on the primary 0–10000 scale.
+Sentrux's own 0–1 figures (coupling, gate `reasons`, `coverage_score`) are
+labeled `(0–1 scale)`; floats are rounded to 3 significant figures
+(`Gini=0.573`), while integer scores and counts print untouched.
 
 ## Commands
 
@@ -162,6 +173,12 @@ or a risen cycle count. Nudge scans share the per-root MCP server with
 `sentrux_session`, so they are skipped while a session baseline is active for
 that root — otherwise a nudge timeout could kill the server and lose the
 session.
+
+The nudge names the root cause whose score fell the most
+(`worst drop: <cause> (<delta>)`), falling back to the overall bottleneck
+when no cause fell. It is delivered as a next-turn message: it appears on
+the following user turn, never inside a one-shot `--print` run (which exits
+before delivery).
 
 ## Installing this package
 

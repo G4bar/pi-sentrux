@@ -7,6 +7,13 @@ export interface UntrackedFilesResult {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/** `.sentrux/` holds extension config (rules.toml, baseline.json), never scanned
+ * sources — telling the model to `git add -N` it is noise. Filtered here so the
+ * warning text and the `untracked` details counts agree everywhere. */
+function isSentruxConfigPath(path: string): boolean {
+  return /(^|\/)\.sentrux(\/|$)/.test(path);
+}
+
 /** Lists untracked files via `git ls-files --others --exclude-standard`. Outside a git repo (or
  * if git itself is missing), returns isGitRepo:false rather than throwing — this probe is purely
  * informational and must never fail the tool call that uses it. */
@@ -29,7 +36,7 @@ export async function findUntrackedFiles(
   if (result.timedOut || result.aborted || result.code !== 0) {
     return { isGitRepo: false, files: [] };
   }
-  const files = result.stdout.split("\0").filter((f) => f.length > 0);
+  const files = result.stdout.split("\0").filter((f) => f.length > 0 && !isSentruxConfigPath(f));
   return { isGitRepo: true, files };
 }
 

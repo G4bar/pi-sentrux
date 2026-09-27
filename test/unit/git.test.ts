@@ -20,6 +20,21 @@ describe("findUntrackedFiles", () => {
     };
     await expect(findUntrackedFiles("/repo", { run: run as never })).resolves.toEqual({ isGitRepo: false, files: [] });
   });
+
+  it("excludes .sentrux/ config paths from the untracked list", async () => {
+    const run = async () => ({
+      code: 0,
+      stdout: ".sentrux/rules.toml\0.sentrux/baseline.json\0src/a.ts\0",
+      stderr: "",
+      timedOut: false,
+      aborted: false,
+    });
+    await expect(findUntrackedFiles("/repo", { run: run as never })).resolves.toEqual({
+      isGitRepo: true,
+      files: ["src/a.ts"],
+    });
+    expect(formatUntrackedWarning(["src/a.ts"])!).not.toContain(".sentrux");
+  });
 });
 
 describe("formatUntrackedWarning", () => {

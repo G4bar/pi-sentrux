@@ -10,11 +10,13 @@ export interface NudgeDeps {
 }
 
 /** Minimal quality snapshot used for baseline/compare. Cycles come from
- * `health.root_causes.acyclicity.raw` (the cycle count, verified P0). */
+ * `health.root_causes.acyclicity.raw` (the cycle count, verified P0); `scores`
+ * keeps every root-cause score so the nudge can name the cause that dropped most. */
 export interface NudgeMeasurement {
   quality: number;
   cycles: number;
   bottleneck: string;
+  scores: Record<string, number>;
 }
 
 export interface NudgeDetails {
@@ -43,10 +45,15 @@ function callTimeoutMs(deps: NudgeDeps): number | undefined {
 /** Build a measurement from a scan+health pair. Health wins for quality when present. */
 export function toMeasurement(scan: ScanResult, health: HealthResult): NudgeMeasurement {
   const rawCycles = health.root_causes?.acyclicity?.raw;
+  const scores: Record<string, number> = {};
+  for (const [name, rc] of Object.entries(health.root_causes ?? {})) {
+    if (typeof rc?.score === "number") scores[name] = rc.score;
+  }
   return {
     quality: health.quality_signal ?? scan.quality_signal,
     cycles: typeof rawCycles === "number" ? rawCycles : 0,
     bottleneck: health.bottleneck ?? "unknown",
+    scores,
   };
 }
 
@@ -64,14 +71,31 @@ export function shouldNudge(before: NudgeMeasurement, after: NudgeMeasurement, t
   return undefined;
 }
 
+/** The root cause whose score fell the most between two measurements (undefined
+ * when nothing fell). Names the regression's location instead of the overall
+ * bottleneck, which may be an unrelated chronically-low cause. */
+export function worstRootCauseDrop(
+  before: NudgeMeasurement,
+  after: NudgeMeasurement,
+): { name: string; delta: number } | undefined {
+  let worst: { name: string; delta: number } | undefined;
+  const names = new Set([...Object.keys(before.scores ?? {}), ...Object.keys(after.scores ?? {})]);
+  for (const name of names) {
+    const b = before.scores?.[name];
+    const a = after.scores?.[name];
+    if (typeof b !== "number" || typeof a !== "number") continue;
+    const delta = a - b;
+    if (!worst || delta < worst.delta) worst = { name, delta };
+  }
+  return worst && worst.delta < 0 ? worst : undefined;
+}
+
 export function formatNudgeMessage(before: NudgeMeasurement, after: NudgeMeasurement): string {
   const delta = after.quality - before.quality;
   const signed = delta > 0 ? `+${delta}` : `${delta}`;
-  return (
-    `sentrux: quality ${before.quality} → ${after.quality} (${signed}), ` +
-    `cycles ${before.cycles} → ${after.cycles}; bottleneck ${after.bottleneck}. ` +
-    `Consider fixing before continuing.`
-  );
+  const worst = worstRootCauseDrop(before, after);
+  const cause = worst ? `worst drop: ${worst.name} (${worst.delta})` : `bottleneck ${after.bottleneck}`;
+  return `sentrux: quality ${before.quality} → ${after.quality} (${signed}), cycles ${before.cycles} → ${after.cycles}; ${cause}. Consider fixing before continuing.`;
 }
 
 export function formatNudgeStatus(after: NudgeMeasurement, delta: number): string {
@@ -122,6 +146,10 @@ function nudgeKey(cwd: string): string {
 export function registerNudgeHooks(pi: ExtensionAPI, deps: NudgeDeps): void {
   const cache = new Map<string, NudgeMeasurement>();
   const inFlight = new Map<string, Promise<NudgeMeasurement | undefined>>();
+  /** Agent-run epoch: `before_agent_start` bumps it and drops pending baselines, so a
+   * new run never reuses the previous run's pending baseline promise — and a stale
+   * baseline that settles late cannot overwrite the new run's cache entry. */
+  let runEpoch = 0;
   const dirty = new Set<string>();
   /** Roots whose baseline wait already ran this agent run: the pre-edit wait costs
    * at most one wait per root per run, not 30 s on every later edit. Reset on
@@ -153,24 +181,27 @@ export function registerNudgeHooks(pi: ExtensionAPI, deps: NudgeDeps): void {
     }
   }
 
-  async function baselineScan(root: string): Promise<NudgeMeasurement | undefined> {
+  async function baselineScan(root: string, epoch: number): Promise<NudgeMeasurement | undefined> {
     try {
       const m = await measure(root);
-      if (m) cache.set(root, m);
+      // A previous run's baseline settling after the run boundary must not
+      // overwrite the new run's cache entry.
+      if (m && epoch === runEpoch) cache.set(root, m);
       return m;
     } catch {
       return undefined;
-    } finally {
-      inFlight.delete(root);
     }
   }
 
   function startBaseline(root: string): void {
     if (cache.has(root) || inFlight.has(root)) return;
-    const p = baselineScan(root);
+    const p = baselineScan(root, runEpoch);
     inFlight.set(root, p);
     // Deliberately not awaited: warm-up style; tool_call awaits it when needed.
-    void p.catch(() => undefined);
+    // The guard keeps a late-settling promise from evicting a newer run's entry.
+    void p.catch(() => undefined).finally(() => {
+      if (inFlight.get(root) === p) inFlight.delete(root);
+    });
   }
 
   pi.on("before_agent_start", (_event, ctx) => {
@@ -178,8 +209,11 @@ export function registerNudgeHooks(pi: ExtensionAPI, deps: NudgeDeps): void {
     dirty.clear();
     waited.clear();
     // Fresh baseline every run: the cache would otherwise blame the agent for edits
-    // the user made between runs.
+    // the user made between runs. The epoch bump also retires the previous run's
+    // pending baseline (a new one starts below) and blocks its late cache write.
+    runEpoch += 1;
     cache.clear();
+    inFlight.clear();
     if (!isNudgeEnabled(deps)) return;
     try {
       const root = nudgeKey(ctx.cwd);

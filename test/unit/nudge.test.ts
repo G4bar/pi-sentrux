@@ -7,6 +7,7 @@ import {
   registerNudgeHooks,
   shouldNudge,
   toMeasurement,
+  worstRootCauseDrop,
 } from "../../extensions/sentrux/nudge.ts";
 
 function makeHealth(overrides: Partial<HealthResult> = {}): HealthResult {
@@ -101,9 +102,14 @@ async function flush(ms = 20): Promise<void> {
 }
 
 describe("toMeasurement / shouldNudge / format", () => {
-  it("takes quality from health and cycles from acyclicity.raw", () => {
+  it("takes quality from health and cycles from acyclicity.raw, keeping every root-cause score", () => {
     const m = toMeasurement(makeScan(1111), makeHealth({ quality_signal: 7222, bottleneck: "depth" }));
-    expect(m).toEqual({ quality: 7222, cycles: 0, bottleneck: "depth" });
+    expect(m).toEqual({
+      quality: 7222,
+      cycles: 0,
+      bottleneck: "depth",
+      scores: { modularity: 4000, acyclicity: 10000, depth: 8889, equality: 5000, redundancy: 8000 },
+    });
   });
 
   it("reads a nonzero cycle count from acyclicity.raw", () => {
@@ -113,25 +119,54 @@ describe("toMeasurement / shouldNudge / format", () => {
   });
 
   it("nudges on a drop at or above the threshold", () => {
-    const before = { quality: 7342, cycles: 0, bottleneck: "equality" };
-    const after = { quality: 7142, cycles: 0, bottleneck: "equality" };
+    const before = { quality: 7342, cycles: 0, bottleneck: "equality", scores: {} };
+    const after = { quality: 7142, cycles: 0, bottleneck: "equality", scores: {} };
     expect(shouldNudge(before, after, 200)?.reason).toBe("drop");
     expect(shouldNudge({ ...before }, { ...after, quality: 7143 }, 200)).toBeUndefined();
   });
 
   it("nudges when cycles rise even without a quality drop", () => {
-    const before = { quality: 7000, cycles: 0, bottleneck: "equality" };
-    const after = { quality: 6999, cycles: 1, bottleneck: "acyclicity" };
+    const before = { quality: 7000, cycles: 0, bottleneck: "equality", scores: {} };
+    const after = { quality: 6999, cycles: 1, bottleneck: "acyclicity", scores: {} };
     expect(shouldNudge(before, after, 200)?.reason).toBe("cycles");
   });
 
-  it("formats the nudge message and status line", () => {
-    const before = { quality: 7342, cycles: 0, bottleneck: "equality" };
-    const after = { quality: 7010, cycles: 1, bottleneck: "equality" };
+  it("finds the root cause that dropped the most, ignoring unchanged and risen causes", () => {
+    const scores = { modularity: 4000, acyclicity: 10000, depth: 8889, equality: 5000, redundancy: 8000 };
+    const before = { quality: 7342, cycles: 0, bottleneck: "redundancy", scores };
+    const after = {
+      quality: 7010,
+      cycles: 1,
+      bottleneck: "redundancy",
+      scores: { ...scores, equality: 4588, modularity: 4100 },
+    };
+    expect(worstRootCauseDrop(before, after)).toEqual({ name: "equality", delta: -412 });
+  });
+
+  it("reports no worst drop when every root-cause score held or rose", () => {
+    const scores = { modularity: 4000, acyclicity: 10000 };
+    const before = { quality: 7000, cycles: 0, bottleneck: "modularity", scores };
+    const after = { quality: 7000, cycles: 0, bottleneck: "modularity", scores: { ...scores, modularity: 4100 } };
+    expect(worstRootCauseDrop(before, after)).toBeUndefined();
+  });
+
+  it("names the root cause that dropped the most instead of the overall bottleneck", () => {
+    const scores = { modularity: 4000, acyclicity: 10000, depth: 8889, equality: 5000, redundancy: 8000 };
+    const before = { quality: 7342, cycles: 0, bottleneck: "redundancy", scores };
+    const after = { quality: 7010, cycles: 1, bottleneck: "redundancy", scores: { ...scores, equality: 4588 } };
     expect(formatNudgeMessage(before, after)).toBe(
-      "sentrux: quality 7342 → 7010 (-332), cycles 0 → 1; bottleneck equality. Consider fixing before continuing.",
+      "sentrux: quality 7342 → 7010 (-332), cycles 0 → 1; worst drop: equality (-412). Consider fixing before continuing.",
     );
     expect(formatNudgeStatus(after, -332)).toBe("Q 7010 (-332)");
+  });
+
+  it("falls back to the bottleneck when no root cause dropped", () => {
+    const scores = { modularity: 4000, acyclicity: 10000 };
+    const before = { quality: 7000, cycles: 0, bottleneck: "modularity", scores };
+    const after = { quality: 6999, cycles: 1, bottleneck: "acyclicity", scores };
+    expect(formatNudgeMessage(before, after)).toBe(
+      "sentrux: quality 7000 → 6999 (-1), cycles 0 → 1; bottleneck acyclicity. Consider fixing before continuing.",
+    );
   });
 });
 
@@ -431,5 +466,75 @@ describe("registerNudgeHooks", () => {
     // No scan ran (a timeout kill would lose the session baseline) and nothing was sent.
     expect(registry.getClientCalls).toBe(0);
     expect(captured.sentMessages).toEqual([]);
+  });
+
+  it("a new run starts its own baseline and ignores the previous run's late-settling one", async () => {
+    const captured = makePi();
+    // Each measure() waits on its own gate, so baselines stay pending until released.
+    interface Step {
+      scan: ScanResult;
+      health: HealthResult;
+      release: () => void;
+      gate: Promise<void>;
+    }
+    const steps: Step[] = [];
+    function addStep(scan: ScanResult, health: HealthResult): void {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      steps.push({ scan, health, release, gate });
+    }
+    addStep(makeScan(1000), makeHealth({ quality_signal: 1000 }));
+    addStep(makeScan(2000), makeHealth({ quality_signal: 2000 }));
+    addStep(makeScan(1500), makeHealth({ quality_signal: 1500 }));
+    let calls = 0;
+    const registry = {
+      async getClient() {
+        const step = steps[Math.min(calls++, steps.length - 1)];
+        return {
+          generation: 0,
+          pid: 1,
+          isAlive: true,
+          start: async () => undefined,
+          close: async () => undefined,
+          forceKillSync: () => undefined,
+          callTool: async <T>(name: string): Promise<T> => {
+            await step.gate;
+            if (name === "scan") return step.scan as unknown as T;
+            if (name === "health") return step.health as unknown as T;
+            throw new Error(`unexpected tool ${name}`);
+          },
+        } as any;
+      },
+    } as any;
+    const config = makeConfig({ nudge: "agent_end", nudgeThreshold: 200 });
+    registerNudgeHooks(captured.pi, { getConfig: () => config, registry });
+
+    const ctx = makeCtx("/root");
+    await emit(captured.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+    await flush();
+    expect(calls).toBe(1); // run 1 baseline pending
+
+    // A new run starts its own baseline instead of reusing run 1's pending one.
+    await emit(captured.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+    await flush();
+    expect(calls).toBe(2);
+
+    // The stale run-1 baseline settles late: it must not overwrite run 2's entry.
+    steps[1].release();
+    await flush();
+    steps[0].release();
+    await flush();
+
+    await emit(captured.handlers, "tool_call", { type: "tool_call", toolCallId: "e1", toolName: "edit" }, ctx);
+    await emit(captured.handlers, "tool_result", { type: "tool_result", toolCallId: "e1", toolName: "edit", isError: false }, ctx);
+    steps[2].release();
+    await emit(captured.handlers, "agent_end", { type: "agent_end", messages: [] }, ctx);
+    await flush(50);
+
+    // before=2000 (run 2), after=1500: a 500-point drop, not the stale 1000.
+    expect(captured.sentMessages).toHaveLength(1);
+    expect(captured.sentMessages[0].message.content).toContain("2000 → 1500 (-500)");
   });
 });

@@ -14,7 +14,7 @@ describe("warmupFailureStatus (§6.6)", () => {
     ).toBe("sentrux: missing libs");
   });
 
-  it("maps a non-executable binary to 'sentrux: missing libs'", () => {
-    expect(warmupFailureStatus(new Error("`/bin/sentrux` is not executable (chmod +x)."))).toBe("sentrux: missing libs");
+  it("maps a non-executable binary to 'sentrux: not executable', not 'missing libs'", () => {
+    expect(warmupFailureStatus(new Error("`/bin/sentrux` is not executable (chmod +x)."))).toBe("sentrux: not executable");
   });
 });

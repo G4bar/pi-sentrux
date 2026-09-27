@@ -33,10 +33,14 @@ function trackRegistryForExit(registry: McpServerRegistry): void {
 }
 
 /** Maps a warm-up failure to the §6.6 status line: version on success,
- * `"sentrux: missing libs"` for the GTK/X11 loader failure, `"sentrux: not found"` otherwise. */
+ * `"sentrux: not executable"` for a chmod problem, `"sentrux: missing libs"` for
+ * the GTK/X11 loader failure, `"sentrux: not found"` otherwise. */
 export function warmupFailureStatus(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err ?? "");
-  if (/cannot start|missing|not executable|shared librar/i.test(message)) {
+  if (/not executable/i.test(message)) {
+    return "sentrux: not executable";
+  }
+  if (/cannot start|missing|shared librar/i.test(message)) {
     return "sentrux: missing libs";
   }
   return "sentrux: not found";

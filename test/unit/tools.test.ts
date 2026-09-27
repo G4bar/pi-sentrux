@@ -198,7 +198,8 @@ describe("sentrux_check_rules", () => {
     );
 
     expect(result.details.violations[0].files).toHaveLength(25);
-    expect(result.content[0].text).toContain("… 20 more files");
+    expect(result.content[0].text).toContain("✗ [Error] no_god_files (1 violation): 1 god file(s) found (fan-out > 15)");
+    expect(result.content[0].text).toContain("… 20 more");
     expect(result.content[0].text.match(/src\/file\d+\.ts/g)).toHaveLength(5);
   });
 
@@ -224,6 +225,51 @@ describe("sentrux_check_rules", () => {
     expect(result.content[0].text).toContain("untracked.ts");
     expect(result.content[0].text).toContain("git add -N");
     expect(result.content[0].text).toContain("ask the user");
+  });
+
+  it("with 60 violations, groups per rule with compact edges and keeps the untracked warning first", async () => {
+    const root = await makeRoot();
+    const binaryPath = await makeBinaryFile(root);
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+    await mkdir(join(root, ".sentrux"), { recursive: true });
+    await writeFile(join(root, ".sentrux", "rules.toml"), "[constraints]\nmax_cycles = 0\n");
+    await writeFile(join(root, "tracked.ts"), "export const a = 1;\n");
+    execFileSync("git", ["add", "tracked.ts", ".sentrux/rules.toml"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: root });
+    await writeFile(join(root, "untracked.ts"), "export const b = 2;\n");
+    const { pi, registered } = makeFakePi();
+    registerCheckRulesTool(
+      pi,
+      makeDeps(binaryPath, fakeConfig({ binaryPath, untrackedWarning: true, maxOutputBytes: 4096, maxOutputLines: 200 })),
+    );
+
+    const edgeBlocks = Array.from(
+      { length: 60 },
+      (_, i) =>
+        `✗ [Error] layer_direction: Layer violation: src/app/f${i}.ts (app) imports src/core/g${i}.ts (core). app must not depend on core.\n` +
+        `    src/app/f${i}.ts\n    src/core/g${i}.ts`,
+    );
+    const stdout = ["sentrux check — 4 rules checked", "", "Quality: 5955", "", ...edgeBlocks, "", "✗ 60 violation(s) found"].join("\n");
+
+    const result = await withFakeSentrux({ FAKE_SENTRUX_STDOUT: stdout, FAKE_SENTRUX_EXIT_CODE: "1" }, () =>
+      registered.sentrux_check_rules.execute("call-60", {}, undefined, undefined, makeCtx(root)),
+    );
+
+    expect(result.details.status).toBe("fail");
+    expect(result.details.violations).toHaveLength(60);
+    const text: string = result.content[0].text;
+    // The warning leads the text, so truncation (tail is dropped) can never remove it.
+    expect(text.startsWith("⚠")).toBe(true);
+    expect(text).toContain("untracked.ts");
+    expect(text).toContain("git add -N");
+    expect(text).not.toContain(".sentrux/rules.toml");
+    expect(text).toContain("FAIL — 60 violation(s) (4 rules checked) · quality 5955");
+    expect(text).toContain("✗ [Error] layer_direction (60 violations)");
+    expect(text).toContain("src/app/f0.ts → src/core/g0.ts");
+    expect(text).toContain("… 40 more");
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(4096);
   });
 
   it("throws Not a directory for a path that is not a directory", async () => {
@@ -379,7 +425,7 @@ describe("sentrux_gate", () => {
     expect(result.details.status).toBe("degraded");
     expect(result.details.reasons).toEqual(["Quality signal dropped: 0.47 → 0.43 (-0.03)", "Cycles increased: 1 → 2"]);
     expect(result.content[0].text).toContain("DEGRADED vs .sentrux/baseline.json");
-    expect(result.content[0].text).toContain("reasons: Quality signal dropped");
+    expect(result.content[0].text).toContain("reasons (Sentrux 0–1 scale): Quality signal dropped");
   });
 
   it("compare with no baseline file returns no_baseline (does not throw)", async () => {

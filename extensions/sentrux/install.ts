@@ -137,16 +137,15 @@ export async function installBinary(options: InstallBinaryOptions): Promise<Inst
 
   const controller = new AbortController();
   const onCallerAbort = (): void => controller.abort(options.signal?.reason);
+  // The aborted-signal guard above already threw, and everything between it and
+  // here is synchronous, so the signal cannot newly be aborted at this point:
+  // attach the listener and arm the timeout unconditionally.
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-  if (options.signal?.aborted) {
-    controller.abort(options.signal.reason);
-  } else {
-    options.signal?.addEventListener("abort", onCallerAbort, { once: true });
-    timeoutTimer = setTimeout(() => {
-      controller.abort(new Error(`install timed out after ${timeoutMs} ms`));
-    }, timeoutMs);
-    timeoutTimer.unref?.();
-  }
+  options.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  timeoutTimer = setTimeout(() => {
+    controller.abort(new Error(`install timed out after ${timeoutMs} ms`));
+  }, timeoutMs);
+  timeoutTimer.unref?.();
 
   try {
     const response = await fetchFn(entry.url, { signal: controller.signal, redirect: "follow" });

@@ -8,6 +8,7 @@ import {
   capThrownMessage,
   formatDsm,
   formatGitStats,
+  formatNum,
   formatScanHealth,
   formatSessionEnd,
   formatTestGaps,
@@ -70,11 +71,11 @@ describe("formatScanHealth", () => {
   it("prints quality/bottleneck, each root cause's score with its labeled raw value, and size counts", () => {
     const text = formatScanHealth("/abs/repo", scan, health);
     expect(text).toContain("Sentrux quality 4674/10000 — bottleneck: redundancy  (root /abs/repo)");
-    expect(text).toContain("modularity 3526 (Q=0.028925619834710738)");
+    expect(text).toContain("modularity 3526 (Q=0.0289)");
     expect(text).toContain("acyclicity 5000 (cycles=1)");
     expect(text).toContain("depth 8889 (max depth=1)");
-    expect(text).toContain("equality 4271 (Gini=0.5729166666666666)");
-    expect(text).toContain("redundancy 3333 (ratio=0.6666666666666666)");
+    expect(text).toContain("equality 4271 (Gini=0.573)");
+    expect(text).toContain("redundancy 3333 (ratio=0.667)");
     expect(text).toContain("files 29 · lines 107 · import edges 22 (cross-module 20)");
   });
 
@@ -105,7 +106,7 @@ describe("formatSessionEnd", () => {
       violations: [],
     };
     const text = formatSessionEnd(result);
-    expect(text).toContain("session: PASS  quality 4674 → 4674 (0) · coupling 0 · cycles 0");
+    expect(text).toContain("session: PASS  quality 4674 → 4674 (0) · coupling 0 (0–1 scale) · cycles 0");
     expect(text).toContain("Quality stable or improved");
     expect(text).not.toContain("violations");
   });
@@ -122,7 +123,7 @@ describe("formatSessionEnd", () => {
       violations: ["new import cycle: a.ts <-> b.ts"],
     };
     const text = formatSessionEnd(result);
-    expect(text).toContain("session: DEGRADED  quality 7342 → 7120 (-222) · coupling +0.04 · cycles +1");
+    expect(text).toContain("session: DEGRADED  quality 7342 → 7120 (-222) · coupling +0.04 (0–1 scale) · cycles +1");
     expect(text).toContain("violations (1):");
     expect(text).toContain("  - new import cycle: a.ts <-> b.ts");
     expect(text).toContain("Quality degraded");
@@ -154,6 +155,19 @@ describe("formatDsm", () => {
     expect(text).toContain("level 0: 2 files, 2 internal edges");
   });
 
+  it("adds a note when cycles exist but Sentrux's interpretation claims clean layering", () => {
+    const text = formatDsm(result, { cycles: 2 });
+    expect(text).toContain("interpretation: Clean layering: all dependencies flow downward");
+    expect(text).toContain("(note: interpretation is Sentrux's own; health currently reports 2 cycles)");
+  });
+
+  it("adds no note when there are no cycles, or the interpretation makes no clean-layering claim", () => {
+    expect(formatDsm(result, { cycles: 0 })).not.toContain("(note:");
+    expect(formatDsm(result)).not.toContain("(note:");
+    const messy = { ...result, interpretation: "Some layering violations observed" };
+    expect(formatDsm(messy, { cycles: 3 })).not.toContain("(note:");
+  });
+
   it("notes the free tier when the matrix field is absent", () => {
     const text = formatDsm(result);
     expect(text).toContain("free tier");
@@ -172,7 +186,30 @@ describe("formatTestGaps", () => {
     const text = formatTestGaps(result);
     expect(text).toContain("source_files: 29");
     expect(text).toContain("untested: 29");
+    expect(text).toContain("coverage_score: 0 (0–1 scale)");
     expect(text).toContain("(free tier: counts only)");
+  });
+
+  it("labels coverage_score as 0–1 scale and rounds it, leaving coverage_ratio on the primary scale", () => {
+    const result: TestGapsResult = { coverage_ratio: 3939, coverage_score: 0.39392, source_files: 33, test_files: 4, tested: 13, untested: 20 };
+    const text = formatTestGaps(result);
+    expect(text).toContain("coverage_ratio: 3939");
+    expect(text).toContain("coverage_score: 0.394 (0–1 scale)");
+  });
+});
+
+describe("formatNum", () => {
+  it("leaves integers (scores, counts) untouched", () => {
+    expect(formatNum(4674)).toBe(4674);
+    expect(formatNum(0)).toBe(0);
+    expect(formatNum(313)).toBe(313);
+  });
+
+  it("rounds floats to 3 significant figures", () => {
+    expect(formatNum(0.5729166666666666)).toBe(0.573);
+    expect(formatNum(0.028925619834710738)).toBe(0.0289);
+    expect(formatNum(0.9090909090909091)).toBe(0.909);
+    expect(formatNum(1.0)).toBe(1);
   });
 });
 

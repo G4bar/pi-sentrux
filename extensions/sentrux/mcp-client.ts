@@ -187,6 +187,10 @@ export class McpClient implements McpClientLike {
     child.stdin.on("error", (err) => {
       if (this.child !== child) return; // a stale event from a process already replaced by a respawn
       this.onChildDown(`stdin error: ${(err as Error).message}`);
+      // A process with a broken stdin can never serve another request. Kill it now:
+      // without this, the next start() respawns and this still-alive process is
+      // orphaned (unreachable — every handler and close path only touches this.child).
+      this.hardKill();
     });
     // No-op error handlers so a stream error on a dying child never throws uncaught.
     child.stdout.on("error", () => {});

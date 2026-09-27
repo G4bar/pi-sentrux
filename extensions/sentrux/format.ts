@@ -87,14 +87,24 @@ export interface GitStatsResult {
 
 type UnknownFieldsSource = HealthResult | SessionEndResult | DsmResult | TestGapsResult | GitStatsResult;
 
+/** Rounds a float to 3 significant figures for model text (Gini=0.4590644753476612
+ * becomes 0.459). Integers (scores, counts) pass through untouched — rounding must
+ * never quantize the primary 0–10000 scale. */
+export function formatNum(value: number): number {
+  if (!Number.isFinite(value) || Number.isInteger(value)) return value;
+  return Number(value.toPrecision(3));
+}
+
 /** Prints any top-level scalar (string/number/boolean) field not in `knownKeys` as `key: value`,
  * so Pro-tier fields the free-tier fixtures don't have still show up instead of being dropped. */
 export function formatUnknownFields(obj: UnknownFieldsSource, knownKeys: readonly string[]): string[] {
   const lines: string[] = [];
   for (const [key, value] of Object.entries(obj)) {
     if (knownKeys.includes(key)) continue;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string" || typeof value === "boolean") {
       lines.push(`${key}: ${value}`);
+    } else if (typeof value === "number") {
+      lines.push(`${key}: ${formatNum(value)}`);
     }
   }
   return lines;
@@ -123,7 +133,7 @@ export function formatScanHealth(root: string, scan: ScanResult, health: HealthR
   for (const name of ROOT_CAUSE_ORDER) {
     const rc = health.root_causes[name];
     if (!rc) continue;
-    rootCauseParts.push(`${name} ${rc.score} (${ROOT_CAUSE_RAW_LABELS[name]}=${rc.raw})`);
+    rootCauseParts.push(`${name} ${rc.score} (${ROOT_CAUSE_RAW_LABELS[name]}=${formatNum(rc.raw)})`);
   }
   if (rootCauseParts.length > 0) lines.push(rootCauseParts.join(" · "));
 
@@ -147,12 +157,13 @@ function formatPairDelta(pair: [number, number], decimals: number): string {
 
 const KNOWN_SESSION_END_KEYS = ["coupling_change", "cycles_change", "pass", "signal_after", "signal_before", "signal_delta", "summary", "violations"];
 
-/** `session_end` text for sentrux_session. Repeatable: always compares against the recorded start. */
+/** `session_end` text for sentrux_session. Repeatable: always compares against the recorded start.
+ * Quality/scores are the primary 0–10000 scale; coupling is Sentrux's 0–1 scale and is labeled. */
 export function formatSessionEnd(result: SessionEndResult): string {
   const label = result.pass ? "PASS" : "DEGRADED";
   const lines = [
     `session: ${label}  quality ${result.signal_before} → ${result.signal_after} (${formatSignedDelta(result.signal_delta, 0)}) · ` +
-      `coupling ${formatPairDelta(result.coupling_change, 2)} · cycles ${formatPairDelta(result.cycles_change, 0)}`,
+      `coupling ${formatPairDelta(result.coupling_change, 2)} (0–1 scale) · cycles ${formatPairDelta(result.cycles_change, 0)}`,
   ];
   if (result.violations.length > 0) {
     lines.push(`violations (${result.violations.length}):`);
@@ -177,16 +188,24 @@ const DSM_KNOWN_KEYS = [
   "matrix",
 ];
 
-/** `dsm` text for sentrux_insights. `clusters` IS present in the free tier; the matrix itself is Pro-only. */
-export function formatDsm(result: DsmResult): string {
+/** `dsm` text for sentrux_insights. `clusters` IS present in the free tier; the matrix itself is Pro-only.
+ * `density`/`propagation_cost` print raw (their scale is unverified — never invent a unit).
+ * When the caller passes the current cycle count and it is > 0 while Sentrux's own
+ * interpretation still claims clean layering, a note says so (the interpretation is
+ * Sentrux's verbatim text and can contradict the measured cycles). */
+export function formatDsm(result: DsmResult, opts: { cycles?: number } = {}): string {
   const lines: string[] = [];
   const order: (keyof DsmResult)[] = ["size", "density", "above_diagonal", "below_diagonal", "same_level", "level_breaks", "propagation_cost", "edge_count"];
   for (const key of order) {
     const value = result[key];
     if (value === undefined) continue;
-    lines.push(`${key}: ${value}`);
+    lines.push(`${key}: ${typeof value === "number" ? formatNum(value) : value}`);
   }
   if (result.interpretation) lines.push(`interpretation: ${result.interpretation}`);
+  if (opts.cycles !== undefined && opts.cycles > 0 && result.interpretation && /clean layering/i.test(result.interpretation)) {
+    const noun = opts.cycles === 1 ? "cycle" : "cycles";
+    lines.push(`(note: interpretation is Sentrux's own; health currently reports ${opts.cycles} ${noun})`);
+  }
   if (result.clusters && result.clusters.length > 0) {
     lines.push(`clusters: ${result.clusters.length}`);
     for (const c of result.clusters) lines.push(`  level ${c.level}: ${c.files_count} files, ${c.internal_edges} internal edges`);
@@ -198,10 +217,18 @@ export function formatDsm(result: DsmResult): string {
 
 const TEST_GAPS_KNOWN_KEYS = ["coverage_ratio", "coverage_score", "source_files", "test_files", "tested", "untested"];
 
-/** `test_gaps` text for sentrux_insights. */
+/** `test_gaps` text for sentrux_insights. `coverage_ratio` is the 0–10000-scale
+ * figure (observed 3939 next to `coverage_score` 0.3939 on a real run) and prints
+ * bare like every other primary-scale number; `coverage_score` is Sentrux's 0–1
+ * scale and is labeled. */
 export function formatTestGaps(result: TestGapsResult): string {
-  const order: (keyof TestGapsResult)[] = ["source_files", "test_files", "tested", "untested", "coverage_ratio", "coverage_score"];
-  const lines = order.filter((key) => result[key] !== undefined).map((key) => `${key}: ${result[key]}`);
+  const lines: string[] = [];
+  if (result.source_files !== undefined) lines.push(`source_files: ${result.source_files}`);
+  if (result.test_files !== undefined) lines.push(`test_files: ${result.test_files}`);
+  if (result.tested !== undefined) lines.push(`tested: ${result.tested}`);
+  if (result.untested !== undefined) lines.push(`untested: ${result.untested}`);
+  if (result.coverage_ratio !== undefined) lines.push(`coverage_ratio: ${formatNum(result.coverage_ratio)}`);
+  if (result.coverage_score !== undefined) lines.push(`coverage_score: ${formatNum(result.coverage_score)} (0–1 scale)`);
   const extra = formatUnknownFields(result, TEST_GAPS_KNOWN_KEYS);
   lines.push(...extra);
   if (extra.length === 0) lines.push("(free tier: counts only)");
@@ -229,7 +256,9 @@ export function formatGitStats(result: GitStatsResult): string {
     "bus_factor_solo_files",
     "single_author_ratio",
   ];
-  const lines = order.filter((key) => result[key] !== undefined).map((key) => `${key}: ${result[key]}`);
+  const lines = order
+    .filter((key) => result[key] !== undefined)
+    .map((key) => `${key}: ${formatNum(result[key] as number)}`);
   const extra = formatUnknownFields(result, GIT_STATS_KNOWN_KEYS);
   lines.push(...extra);
   if (extra.length === 0) lines.push("(free tier: counts only)");
