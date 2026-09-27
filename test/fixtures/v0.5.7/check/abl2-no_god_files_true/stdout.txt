@@ -1,0 +1,8 @@
+sentrux check — 1 rules checked
+
+Quality: 4674
+
+✗ [Error] no_god_files: 1 god file(s) found (fan-out > 15)
+    src/app/god.ts (fan-out=16)
+
+✗ 1 violation(s) found

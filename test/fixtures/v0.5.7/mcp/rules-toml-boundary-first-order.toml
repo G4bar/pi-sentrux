@@ -1,0 +1,17 @@
+[[boundaries]]
+from = "src/core/*"
+to = "src/app/*"
+reason = "core must not import app-specific helpers"
+
+[[layers]]
+name = "core"
+paths = ["src/core/*"]
+order = 0
+
+[[layers]]
+name = "app"
+paths = ["src/app/*"]
+order = 1
+
+[constraints]
+max_cycles = 0

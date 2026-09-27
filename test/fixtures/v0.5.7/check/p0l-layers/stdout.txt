@@ -1,0 +1,9 @@
+sentrux check — 1 rules checked
+
+Quality: 4674
+
+✗ [Error] layer_direction: Layer violation: src/app/uses_core.ts (app) imports src/core/base.ts (core). app must not depend on core.
+    src/app/uses_core.ts
+    src/core/base.ts
+
+✗ 1 violation(s) found

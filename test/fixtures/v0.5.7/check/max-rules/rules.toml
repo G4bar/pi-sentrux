@@ -1,0 +1,29 @@
+[constraints]
+min_quality = 0.9
+min_modularity = 0.9
+min_acyclicity = 0.99
+min_depth = 0.99
+min_equality = 0.99
+min_redundancy = 0.99
+max_coupling_score = 0.01
+max_cycles = 0
+max_cc = 5
+max_file_lines = 5
+max_fn_lines = 5
+no_god_files = true
+max_upward_violations = 0
+
+[[layers]]
+name = "core"
+paths = ["src/core/*"]
+order = 0
+
+[[layers]]
+name = "app"
+paths = ["src/app/*"]
+order = 1
+
+[[boundaries]]
+from = "src/core/*"
+to = "src/app/*"
+reason = "core must not import app-specific helpers"

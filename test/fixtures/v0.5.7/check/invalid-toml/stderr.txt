@@ -1,0 +1,9 @@
+Warning: Failed to parse /tmp/sentrux-p0c-invalid/.sentrux/rules.toml: TOML parse error at line 1, column 13
+  |
+1 | [constraints
+  |             ^
+invalid table header
+expected `.`, `]`
+
+No .sentrux/rules.toml found in /tmp/sentrux-p0c-invalid
+Create one to define architectural constraints.

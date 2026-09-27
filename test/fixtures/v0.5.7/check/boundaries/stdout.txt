@@ -1,0 +1,9 @@
+sentrux check — 1 rules checked
+
+Quality: 4674
+
+✗ [Error] boundary: Boundary violation: src/core/uses_app.ts imports src/app/helper.ts — core must not import app-specific helpers
+    src/core/uses_app.ts
+    src/app/helper.ts
+
+✗ 1 violation(s) found

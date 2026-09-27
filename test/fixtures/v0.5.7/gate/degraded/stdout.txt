@@ -1,0 +1,10 @@
+sentrux gate — structural regression check
+
+Quality:      4674 -> 4349
+Coupling:     0.91 → 0.83
+Cycles:       1 → 2
+God files:    1 → 1
+
+✗ DEGRADED
+  ✗ Quality signal dropped: 0.47 → 0.43 (-0.03)
+  ✗ Cycles increased: 1 → 2

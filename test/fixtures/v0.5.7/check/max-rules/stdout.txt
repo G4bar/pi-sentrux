@@ -1,0 +1,36 @@
+sentrux check — 15 rules checked
+
+Quality: 4674
+
+✗ [Error] min_quality: Quality signal 0.47 below minimum required 0.90
+✗ [Error] min_modularity: modularity score 0.3526 below minimum required 0.9000
+✗ [Error] min_acyclicity: acyclicity score 0.5000 below minimum required 0.9900
+✗ [Error] min_depth: depth score 0.8889 below minimum required 0.9900
+✗ [Error] min_equality: equality score 0.4271 below minimum required 0.9900
+✗ [Error] min_redundancy: redundancy score 0.3333 below minimum required 0.9900
+✗ [Error] max_coupling_score: Coupling score 0.91 exceeds maximum allowed 0.01
+✗ [Error] max_cycles: Found 1 circular dependencies, maximum allowed is 0
+    src/core/cycle_a.ts
+    src/core/cycle_b.ts
+✗ [Error] max_cc: 1 function(s) exceed max cyclomatic complexity of 5
+    src/app/complex.ts:complexDecision (cc=21)
+✗ [Error] max_file_lines: 4 file(s) exceed max length of 5 lines
+    src/app/complex.ts (23 lines)
+    src/app/god.ts (21 lines)
+    src/core/cycle_a.ts (7 lines)
+    src/core/cycle_b.ts (7 lines)
+✗ [Error] max_fn_lines: 1 function(s) exceed max length of 5 lines
+    src/app/complex.ts:complexDecision (23 lines)
+✗ [Error] no_god_files: 1 god file(s) found (fan-out > 15)
+    src/app/god.ts (fan-out=16)
+✗ [Error] max_upward_violations: 2 upward dependency violations, maximum allowed is 0
+    src/core/cycle_a.ts (L0) → src/core/cycle_b.ts (L0)
+    src/core/cycle_b.ts (L0) → src/core/cycle_a.ts (L0)
+✗ [Error] layer_direction: Layer violation: src/app/uses_core.ts (app) imports src/core/base.ts (core). app must not depend on core.
+    src/app/uses_core.ts
+    src/core/base.ts
+✗ [Error] boundary: Boundary violation: src/core/uses_app.ts imports src/app/helper.ts — core must not import app-specific helpers
+    src/core/uses_app.ts
+    src/app/helper.ts
+
+✗ 15 violation(s) found

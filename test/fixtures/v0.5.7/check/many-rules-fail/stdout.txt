@@ -1,0 +1,16 @@
+sentrux check — 5 rules checked
+
+Quality: 4674
+
+✗ [Error] max_cycles: Found 1 circular dependencies, maximum allowed is 0
+    src/core/cycle_a.ts
+    src/core/cycle_b.ts
+✗ [Error] max_cc: 1 function(s) exceed max cyclomatic complexity of 10
+    src/app/complex.ts:complexDecision (cc=21)
+✗ [Error] no_god_files: 1 god file(s) found (fan-out > 15)
+    src/app/god.ts (fan-out=16)
+✗ [Error] max_upward_violations: 2 upward dependency violations, maximum allowed is 0
+    src/core/cycle_a.ts (L0) → src/core/cycle_b.ts (L0)
+    src/core/cycle_b.ts (L0) → src/core/cycle_a.ts (L0)
+
+✗ 4 violation(s) found

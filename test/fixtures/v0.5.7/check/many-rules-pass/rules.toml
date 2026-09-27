@@ -1,0 +1,6 @@
+[constraints]
+min_quality = 0.0
+max_cycles = 100
+max_cc = 1000
+no_god_files = false
+max_upward_violations = 1000

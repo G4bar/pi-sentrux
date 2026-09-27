@@ -1,0 +1,29 @@
+{
+  "name": "pi-sentrux",
+  "version": "0.1.0",
+  "description": "Sentrux architecture-quality tools (Quality Signal, rules, gate, session diff) for the pi coding agent",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "sentrux", "architecture", "code-quality"],
+  "files": ["extensions", "skills", "README.md", "LICENSE"],
+  "pi": { "extensions": ["./extensions/sentrux/index.ts"], "skills": ["./skills"] },
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "typebox": "1.3.27",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run test/unit",
+    "test:integration": "vitest run test/integration"
+  }
+}

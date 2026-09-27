@@ -1,0 +1,2 @@
+No .sentrux/rules.toml found in /tmp/sentrux-fixture-repo
+Create one to define architectural constraints.

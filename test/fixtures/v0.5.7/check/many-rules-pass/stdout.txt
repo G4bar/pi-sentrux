@@ -1,0 +1,5 @@
+sentrux check — 4 rules checked
+
+Quality: 4674
+
+✓ All rules pass

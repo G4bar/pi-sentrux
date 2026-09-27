@@ -1,0 +1,4 @@
+Baseline saved to /tmp/sentrux-p0-gate/.sentrux/baseline.json
+Quality: 4674
+
+Run `sentrux gate` after making changes to compare.

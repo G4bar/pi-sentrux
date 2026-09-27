@@ -1,0 +1,5 @@
+Scanning /tmp/sentrux-p0c-boundaries...
+[build_project_map] 29 files, 7 unique dirs, 5 cache misses, 0.8ms
+[resolve] 22 resolved, 0 unresolved (of 22 total specs)
+[resolve_imports] project_map 0.9ms, suffix_idx 0.1ms, suffix_resolve 0.9ms, total 1.9ms
+[build_graphs] 29 files | maps 0.0ms, imports 1.9ms, calls+inherit 1.5ms, total 3.5ms | 22 import, 4 call, 0 inherit edges

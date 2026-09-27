@@ -1,0 +1,5 @@
+--- ~/.sentrux telemetry-related files (should be ONLY telemetry_opt_out + plugins/) ---
+~/.sentrux
+~/.sentrux/plugins
+~/.sentrux/telemetry_opt_out
+~/.sentrux/telemetry_pending.json

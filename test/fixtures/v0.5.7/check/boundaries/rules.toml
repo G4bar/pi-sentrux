@@ -1,0 +1,4 @@
+[[boundaries]]
+from = "src/core/*"
+to = "src/app/*"
+reason = "core must not import app-specific helpers"

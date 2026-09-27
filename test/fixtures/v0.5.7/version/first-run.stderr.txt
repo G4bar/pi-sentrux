@@ -1,0 +1,5 @@
+
+  Downloading language grammars for v0.5.7...
+  (one-time download, ~30MB)
+  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0%  51 language grammars ready.
+

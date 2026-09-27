@@ -1,0 +1,7 @@
+Scanning /tmp/sentrux-p0-gate...
+[build_project_map] 29 files, 7 unique dirs, 5 cache misses, 0.8ms
+[resolve] 22 resolved, 0 unresolved (of 22 total specs)
+[resolve_imports] project_map 0.9ms, suffix_idx 0.1ms, suffix_resolve 1.2ms, total 2.1ms
+[build_graphs] 29 files | maps 0.0ms, imports 2.2ms, calls+inherit 1.4ms, total 3.6ms | 22 import, 4 call, 0 inherit edges
+Failed to load baseline at /tmp/sentrux-p0-gate/.sentrux/baseline.json: Failed to read baseline from /tmp/sentrux-p0-gate/.sentrux/baseline.json: No such file or directory (os error 2)
+Run `sentrux gate --save` first to create one.
