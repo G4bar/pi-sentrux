@@ -33,7 +33,13 @@ Pinned to **v0.5.7**: versions below 0.5.0 are rejected, and any version other t
 
 ## Install
 
-Install the extension:
+Install the extension from npm:
+
+```sh
+pi install npm:pi-sentrux
+```
+
+Or from GitHub (append `@v0.1.0` to either form to pin a version):
 
 ```sh
 pi install git:github.com/G4bar/pi-sentrux
