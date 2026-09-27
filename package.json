@@ -1,16 +1,42 @@
 {
   "name": "pi-sentrux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Architecture quality for your pi agent: Sentrux 0–10000 scores, cycle detection, rule checks and regression gates",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "sentrux", "architecture", "code-quality", "dependency-cycles", "mcp"],
-  "repository": {"type": "git", "url": "git+https://github.com/G4bar/pi-sentrux.git"},
+  "keywords": [
+    "pi-package",
+    "sentrux",
+    "architecture",
+    "code-quality",
+    "dependency-cycles",
+    "mcp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/G4bar/pi-sentrux.git"
+  },
   "homepage": "https://github.com/G4bar/pi-sentrux#readme",
-  "bugs": {"url": "https://github.com/G4bar/pi-sentrux/issues"},
-  "files": ["extensions", "skills", "README.md", "LICENSE"],
-  "pi": { "extensions": ["./extensions/sentrux/index.ts"], "skills": ["./skills"] },
-  "engines": { "node": ">=22.19.0" },
+  "bugs": {
+    "url": "https://github.com/G4bar/pi-sentrux/issues"
+  },
+  "files": [
+    "extensions",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/sentrux/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
