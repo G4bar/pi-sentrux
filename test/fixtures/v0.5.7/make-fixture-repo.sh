@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Recreates the Phase 0 Sentrux fixture repo described in PLAN.md §11
-# "Phase 0 — capture real behaviour". TypeScript fixture; see PLAN.md for the
-# Python fallback if import_edges turns out to be 0 with the real binary.
+# Recreates the Sentrux fixture repo used for the v0.5.7 test fixtures.
+# TypeScript fixture covering layers, cycle, god file, and complex function.
 #
 # Usage: make-fixture-repo.sh [target-dir]
 # Default target-dir is a fresh mktemp directory (printed on stdout).

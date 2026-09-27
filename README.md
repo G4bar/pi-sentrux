@@ -36,10 +36,10 @@ Pinned to **v0.5.7**: versions below 0.5.0 are rejected, and any version other t
 Install the extension:
 
 ```sh
-pi install git:github.com/<owner>/pi-sentrux
+pi install git:github.com/G4bar/pi-sentrux
 ```
 
-Replace `<owner>` with the GitHub owner once the repository exists. For local use:
+For local use:
 
 ```sh
 pi -e /path/to/pi-sentrux

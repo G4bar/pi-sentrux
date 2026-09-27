@@ -112,7 +112,7 @@ export function formatUnknownFields(obj: UnknownFieldsSource, knownKeys: readonl
 
 const ROOT_CAUSE_ORDER = ["modularity", "acyclicity", "depth", "equality", "redundancy"] as const;
 
-/** raw's meaning per root cause (§ PLAN.md "Real MCP result shapes"): acyclicity=cycle count,
+/** raw's meaning per root cause: acyclicity=cycle count,
  * depth=max depth, equality=Gini coefficient, modularity=Q, redundancy=(dead+duplicate)/total. */
 const ROOT_CAUSE_RAW_LABELS: Record<(typeof ROOT_CAUSE_ORDER)[number], string> = {
   modularity: "Q",
