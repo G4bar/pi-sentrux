@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { McpClientLike } from "../../extensions/sentrux/mcp-client.ts";
+import type { McpClientLike } from "../../extensions/sentrux/types.ts";
 import { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
+import { makeFakeMcpClient } from "../helpers.ts";
 
 class FakeMcpClient implements McpClientLike {
   private alive = false;
@@ -128,17 +129,7 @@ describe("McpServerRegistry", () => {
   });
 
   it("closeAll does not wait past its timeout for a client whose close() hangs", async () => {
-    const hangingClient: McpClientLike = {
-      isAlive: true,
-      generation: 0,
-      pid: undefined,
-      start: async () => {},
-      callTool: async () => {
-        throw new Error("not exercised");
-      },
-      close: () => new Promise(() => {}),
-      forceKillSync: () => {},
-    };
+    const hangingClient: McpClientLike = makeFakeMcpClient({ close: () => new Promise(() => {}) });
     const registry = new McpServerRegistry({ maxServers: () => 3, createClient: () => hangingClient });
     await registry.getClient("/root/hang");
 
@@ -150,17 +141,10 @@ describe("McpServerRegistry", () => {
   it("killAllSync still reaches clients whose closeAll close() has not settled", async () => {
     let forceKills = 0;
     let finishClose!: () => void;
-    const hangingClient: McpClientLike = {
-      isAlive: true,
-      generation: 0,
-      pid: undefined,
-      start: async () => {},
-      callTool: async () => {
-        throw new Error("not exercised");
-      },
+    const hangingClient: McpClientLike = makeFakeMcpClient({
       close: () => new Promise<void>((resolve) => (finishClose = resolve)),
       forceKillSync: () => void forceKills++,
-    };
+    });
     const registry = new McpServerRegistry({ maxServers: () => 3, createClient: () => hangingClient });
     await registry.getClient("/root/hang");
 

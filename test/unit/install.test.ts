@@ -29,6 +29,44 @@ function versionRun(stdout = "sentrux 0.5.7\n") {
   return async () => ({ code: 0, stdout, stderr: "", timedOut: false, aborted: false });
 }
 
+const hangingFetch = (_url: string, init?: RequestInit): Promise<Response> =>
+  new Promise((_resolve, reject) => {
+    if (init?.signal?.aborted) {
+      reject(init.signal.reason instanceof Error ? init.signal.reason : new Error("aborted"));
+      return;
+    }
+    init?.signal?.addEventListener("abort", () => reject(init.signal!.reason instanceof Error ? init.signal!.reason : new Error("aborted")), { once: true });
+  });
+
+const nullBodyFetch = (async () =>
+  ({
+    ok: true,
+    status: 200,
+    body: null,
+    arrayBuffer: async () => PAYLOAD.buffer.slice(PAYLOAD.byteOffset, PAYLOAD.byteOffset + PAYLOAD.byteLength),
+  }) as unknown as Response) as (url: string) => Promise<Response>;
+
+// Yields one chunk and then stalls until the install aborts: the temp file
+// exists when the timeout fires, so cleanup is actually exercised.
+const stallAfterOneChunkFetch = (_url: string, init?: RequestInit): Promise<Response> => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial-bytes"));
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        controller.error(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+        return;
+      }
+      signal?.addEventListener(
+        "abort",
+        () => controller.error(signal.reason instanceof Error ? signal.reason : new Error("aborted")),
+        { once: true },
+      );
+    },
+  });
+  return Promise.resolve(new Response(stream));
+};
+
 describe("installBinary (injected fetch, no real network)", () => {
   let dir: string;
 
@@ -116,14 +154,6 @@ describe("installBinary (injected fetch, no real network)", () => {
 
   it("aborts the download when the caller's signal fires", async () => {
     const controller = new AbortController();
-    const hangingFetch = (_url: string, init?: RequestInit): Promise<Response> =>
-      new Promise((_resolve, reject) => {
-        if (init?.signal?.aborted) {
-          reject(init.signal.reason instanceof Error ? init.signal.reason : new Error("aborted"));
-          return;
-        }
-        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason instanceof Error ? init.signal!.reason : new Error("aborted")), { once: true });
-      });
     const pending = installBinary({
       agentDir: dir,
       entry: TEST_ENTRY,
@@ -136,6 +166,51 @@ describe("installBinary (injected fetch, no real network)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     controller.abort(new Error("user cancelled"));
     await expect(pending).rejects.toThrow(/user cancelled/);
+  });
+
+  it("rejects a streaming download that exceeds maxBytes and removes the temp file", async () => {
+    await expect(
+      installBinary({ agentDir: dir, entry: TEST_ENTRY, fetchFn: fetchOk(), run: versionRun(), maxBytes: 4 }),
+    ).rejects.toThrow(/download exceeds the \d+ MB limit/);
+    expect(await readdir(join(dir, "pi-sentrux", "bin"))).toEqual([]);
+  });
+
+  it("installs from a non-streaming (null body) response", async () => {
+    const result = await installBinary({
+      agentDir: dir,
+      entry: TEST_ENTRY,
+      fetchFn: nullBodyFetch,
+      run: versionRun(),
+    });
+    expect(await readFile(result.path)).toEqual(PAYLOAD);
+  });
+
+  it("rejects a non-streaming body that exceeds maxBytes", async () => {
+    await expect(
+      installBinary({
+        agentDir: dir,
+        entry: TEST_ENTRY,
+        fetchFn: nullBodyFetch,
+        run: versionRun(),
+        maxBytes: 4,
+      }),
+    ).rejects.toThrow(/download exceeds the \d+ MB limit/);
+    expect(await readdir(join(dir, "pi-sentrux", "bin"))).toEqual([]);
+  });
+
+  it("rejects when the install times out and leaves no temp files", async () => {
+    await expect(
+      installBinary({
+        agentDir: dir,
+        entry: TEST_ENTRY,
+        fetchFn: stallAfterOneChunkFetch,
+        run: versionRun(),
+        timeoutMs: 20,
+      }),
+    ).rejects.toThrow(/install timed out after 20 ms/);
+    const files = await readdir(join(dir, "pi-sentrux", "bin")).catch(() => []);
+    expect(files.filter((f) => f.includes(".tmp-"))).toEqual([]);
+    expect(files).toEqual([]);
   });
 
   it("pins the real v0.5.7 table (linux-x86_64 digest matches the release page)", () => {

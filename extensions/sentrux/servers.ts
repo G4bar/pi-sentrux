@@ -1,4 +1,4 @@
-import type { McpClientLike } from "./mcp-client.ts";
+import type { McpClientLike } from "./types.ts";
 
 const DEFAULT_MAX_SERVERS = 3;
 const DEFAULT_CLOSE_ALL_TIMEOUT_MS = 3000;

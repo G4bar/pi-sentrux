@@ -2,29 +2,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, type SentruxConfig } from "../../extensions/sentrux/config.ts";
+import type { SentruxConfig } from "../../extensions/sentrux/config.ts";
 import { McpClient } from "../../extensions/sentrux/mcp-client.ts";
 import { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
 import { registerInsightsTool, registerScanTool, registerSessionTool, type SentruxMcpToolDeps } from "../../extensions/sentrux/tools.ts";
+import { makeConfig, makeCtx, makeFakePi } from "../helpers.ts";
 
 const FAKE_SENTRUX = join(import.meta.dirname, "..", "fixtures", "fake-sentrux.mjs");
 
-function makeFakePi() {
-  const registered: Record<string, any> = {};
-  const pi = { registerTool: (tool: any) => { registered[tool.name] = tool; } } as any;
-  return { pi, registered };
-}
-
-function makeCtx(cwd: string): any {
-  return { cwd };
-}
-
-function fakeConfig(overrides: Partial<SentruxConfig> = {}): SentruxConfig {
-  return { ...DEFAULT_CONFIG, untrackedWarning: false, mcpStartTimeoutMs: 5000, mcpCallTimeoutMs: 5000, ...overrides };
-}
-
 const registries: McpServerRegistry[] = [];
 const tmpDirs: string[] = [];
+
+function fakeConfig(overrides: Partial<SentruxConfig> = {}): SentruxConfig {
+  return makeConfig({ untrackedWarning: false, mcpStartTimeoutMs: 5000, mcpCallTimeoutMs: 5000, ...overrides });
+}
 
 function makeRegistry(config: SentruxConfig, env?: NodeJS.ProcessEnv): McpServerRegistry {
   const registry = new McpServerRegistry({

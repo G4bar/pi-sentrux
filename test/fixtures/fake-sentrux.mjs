@@ -87,180 +87,186 @@ function runClassicMode() {
 //   FAKE_SENTRUX_MCP_IGNORE_EOF        when set, stdin EOF does NOT exit the process (forces the client's
 //                                      close() to fall through to SIGTERM/SIGKILL)
 function runMcpMode() {
-  const ALL_TOOLS = ["scan", "rescan", "session_start", "session_end", "health", "check_rules", "git_stats", "dsm", "test_gaps"];
-
-  const serverVersion = process.env.FAKE_SENTRUX_MCP_VERSION ?? "0.5.7";
-  const protocolVersion = process.env.FAKE_SENTRUX_MCP_PROTOCOL_VERSION ?? "2024-11-05";
-  const missingTool = process.env.FAKE_SENTRUX_MCP_MISSING_TOOL;
-  const errorTool = process.env.FAKE_SENTRUX_MCP_ERROR_TOOL;
-  const errorText = process.env.FAKE_SENTRUX_MCP_ERROR_TEXT ?? "boom";
-  const rpcErrorMethod = process.env.FAKE_SENTRUX_MCP_RPC_ERROR_METHOD;
-  const rpcErrorText = process.env.FAKE_SENTRUX_MCP_RPC_ERROR_TEXT ?? "fake rpc error";
-  const garbageAfter = process.env.FAKE_SENTRUX_MCP_GARBAGE_AFTER;
-  const hangTool = process.env.FAKE_SENTRUX_MCP_HANG_TOOL;
-  const crashTool = process.env.FAKE_SENTRUX_MCP_CRASH_TOOL;
-  const ignoreEof = Boolean(process.env.FAKE_SENTRUX_MCP_IGNORE_EOF);
-
-  const state = { baseline: undefined };
-  let garbageEmitted = false;
-
-  function reply(id, result) {
-    process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
-  }
-
-  function replyError(id, code, message) {
-    process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })}\n`);
-  }
-
-  function maybeEmitGarbage(afterMethod) {
-    if (!garbageEmitted && garbageAfter === afterMethod) {
-      garbageEmitted = true;
-      process.stdout.write("not-json-garbage-line\n");
-    }
-  }
-
-  function toolList() {
-    return ALL_TOOLS.filter((name) => name !== missingTool).map((name) => ({
-      name,
-      description: `fake ${name}`,
-      inputSchema: { type: "object", properties: {} },
-    }));
-  }
-
-  function toolResult(name, callArgs) {
-    switch (name) {
-      case "scan":
-        return { scanned: callArgs?.path, quality_signal: 4674, files: 29, lines: 107, import_edges: 22 };
-      case "rescan":
-        return { status: "Rescanned", quality_signal: 4674, files: 29 };
-      case "session_start":
-        state.baseline = { quality_signal: 4674 };
-        return { message: "Call 'session_end' after making changes to see the diff", quality_signal: 4674, status: "Baseline saved" };
-      case "session_end":
-        if (!state.baseline) {
-          return { errorText: "No baseline saved. Call 'session_start' first." };
-        }
-        return {
-          pass: true,
-          signal_before: 4674,
-          signal_after: 4674,
-          signal_delta: 0,
-          coupling_change: [0, 0],
-          cycles_change: [0, 0],
-          violations: [],
-          summary: "Quality stable or improved",
-        };
-      case "health":
-        return { quality_signal: 4674, bottleneck: "none", root_causes: {}, total_import_edges: 22, cross_module_edges: 0 };
-      case "check_rules":
-        return {
-          pass: true,
-          rules_checked: 0,
-          violation_count: 0,
-          violations: [],
-          summary: "ok",
-          truncated: { message: "Checking up to 3 rules. More available with sentrux Pro.", rules_checked: 0, total_rules_defined: 0 },
-        };
-      case "git_stats":
-        return {
-          lookback_days: callArgs?.days ?? 30,
-          commits_analyzed: 0,
-          files_with_churn: 0,
-          single_author_ratio: 0,
-          coupling_pairs_found: 0,
-          hotspot_count: 0,
-          bus_factor_solo_files: 0,
-        };
-      case "dsm":
-        return {
-          size: 0,
-          density: 0,
-          above_diagonal: 0,
-          below_diagonal: 0,
-          propagation_cost: 0,
-          level_breaks: 0,
-          interpretation: "",
-          clusters: [],
-        };
-      case "test_gaps":
-        return { coverage_score: 0, source_files: 0, test_files: 0, tested: 0, untested: 0, coverage_ratio: 0 };
-      default:
-        return undefined;
-    }
-  }
-
+  const settings = readMcpSettings();
+  const state = { baseline: undefined, garbageEmitted: false };
   const rl = createInterface({ input: process.stdin });
-
   rl.on("line", (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let msg;
-    try {
-      msg = JSON.parse(trimmed);
-    } catch {
-      return;
-    }
-    const { method, id, params } = msg;
-
-    if (rpcErrorMethod && method === rpcErrorMethod) {
-      if (id !== undefined) replyError(id, -32000, rpcErrorText);
-      return;
-    }
-
-    if (method === "initialize") {
-      reply(id, { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "sentrux", version: serverVersion } });
-      maybeEmitGarbage("initialize");
-      return;
-    }
-    if (method === "notifications/initialized") {
-      maybeEmitGarbage("notifications/initialized");
-      return;
-    }
-    if (method === "tools/list") {
-      reply(id, { tools: toolList() });
-      maybeEmitGarbage("tools/list");
-      return;
-    }
-    if (method === "ping") {
-      reply(id, {});
-      maybeEmitGarbage("ping");
-      return;
-    }
-    if (method === "tools/call") {
-      const name = params?.name;
-      const callArgs = params?.arguments ?? {};
-
-      if (crashTool && name === crashTool) {
-        process.exit(1);
-      }
-      if (hangTool && name === hangTool) {
-        return;
-      }
-      if (!ALL_TOOLS.includes(name) || name === missingTool) {
-        reply(id, { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true });
-        return;
-      }
-      if (errorTool && name === errorTool) {
-        reply(id, { content: [{ type: "text", text: errorText }], isError: true });
-        return;
-      }
-
-      const result = toolResult(name, callArgs);
-      if (result && result.errorText) {
-        reply(id, { content: [{ type: "text", text: result.errorText }], isError: true });
-        return;
-      }
-      reply(id, { content: [{ type: "text", text: JSON.stringify(result) }] });
-      maybeEmitGarbage("tools/call");
-      return;
-    }
-
-    if (id !== undefined) {
-      replyError(id, -32601, `Unknown method: ${method}`);
-    }
+    const parsed = parseMcpLine(line);
+    if (parsed) handleMcpMessage(settings, state, parsed[0]);
   });
-
   rl.on("close", () => {
-    if (!ignoreEof) process.exit(0);
+    if (!settings.ignoreEof) process.exit(0);
   });
+}
+
+function readMcpSettings() {
+  return {
+    allTools: ["scan", "rescan", "session_start", "session_end", "health", "check_rules", "git_stats", "dsm", "test_gaps"],
+    serverVersion: process.env.FAKE_SENTRUX_MCP_VERSION ?? "0.5.7",
+    protocolVersion: process.env.FAKE_SENTRUX_MCP_PROTOCOL_VERSION ?? "2024-11-05",
+    missingTool: process.env.FAKE_SENTRUX_MCP_MISSING_TOOL,
+    errorTool: process.env.FAKE_SENTRUX_MCP_ERROR_TOOL,
+    errorText: process.env.FAKE_SENTRUX_MCP_ERROR_TEXT ?? "boom",
+    rpcErrorMethod: process.env.FAKE_SENTRUX_MCP_RPC_ERROR_METHOD,
+    rpcErrorText: process.env.FAKE_SENTRUX_MCP_RPC_ERROR_TEXT ?? "fake rpc error",
+    garbageAfter: process.env.FAKE_SENTRUX_MCP_GARBAGE_AFTER,
+    hangTool: process.env.FAKE_SENTRUX_MCP_HANG_TOOL,
+    crashTool: process.env.FAKE_SENTRUX_MCP_CRASH_TOOL,
+    ignoreEof: Boolean(process.env.FAKE_SENTRUX_MCP_IGNORE_EOF),
+  };
+}
+
+function mcpReply(id, result) {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
+}
+
+function mcpReplyError(id, code, message) {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })}\n`);
+}
+
+function maybeEmitGarbage(settings, state, afterMethod) {
+  if (!state.garbageEmitted && settings.garbageAfter === afterMethod) {
+    state.garbageEmitted = true;
+    process.stdout.write("not-json-garbage-line\n");
+  }
+}
+
+function mcpToolList(settings) {
+  return settings.allTools.filter((name) => name !== settings.missingTool).map((name) => ({
+    name,
+    description: `fake ${name}`,
+    inputSchema: { type: "object", properties: {} },
+  }));
+}
+
+function mcpToolResult(name, callArgs, state) {
+  switch (name) {
+    case "scan":
+      return { scanned: callArgs?.path, quality_signal: 4674, files: 29, lines: 107, import_edges: 22 };
+    case "rescan":
+      return { status: "Rescanned", quality_signal: 4674, files: 29 };
+    case "session_start":
+      state.baseline = { quality_signal: 4674 };
+      return { message: "Call 'session_end' after making changes to see the diff", quality_signal: 4674, status: "Baseline saved" };
+    case "session_end":
+      if (!state.baseline) {
+        return { errorText: "No baseline saved. Call 'session_start' first." };
+      }
+      return {
+        pass: true,
+        signal_before: 4674,
+        signal_after: 4674,
+        signal_delta: 0,
+        coupling_change: [0, 0],
+        cycles_change: [0, 0],
+        violations: [],
+        summary: "Quality stable or improved",
+      };
+    case "health":
+      return { quality_signal: 4674, bottleneck: "none", root_causes: {}, total_import_edges: 22, cross_module_edges: 0 };
+    case "check_rules":
+      return {
+        pass: true,
+        rules_checked: 0,
+        violation_count: 0,
+        violations: [],
+        summary: "ok",
+        truncated: { message: "Checking up to 3 rules. More available with sentrux Pro.", rules_checked: 0, total_rules_defined: 0 },
+      };
+    case "git_stats":
+      return {
+        lookback_days: callArgs?.days ?? 30,
+        commits_analyzed: 0,
+        files_with_churn: 0,
+        single_author_ratio: 0,
+        coupling_pairs_found: 0,
+        hotspot_count: 0,
+        bus_factor_solo_files: 0,
+      };
+    case "dsm":
+      return {
+        size: 0,
+        density: 0,
+        above_diagonal: 0,
+        below_diagonal: 0,
+        propagation_cost: 0,
+        level_breaks: 0,
+        interpretation: "",
+        clusters: [],
+      };
+    case "test_gaps":
+      return { coverage_score: 0, source_files: 0, test_files: 0, tested: 0, untested: 0, coverage_ratio: 0 };
+    default:
+      return undefined;
+  }
+}
+
+function parseMcpLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  try {
+    return [JSON.parse(trimmed)];
+  } catch {
+    return undefined;
+  }
+}
+
+function handleMcpMessage(settings, state, msg) {
+  const { method, id, params } = msg;
+  if (settings.rpcErrorMethod && method === settings.rpcErrorMethod) {
+    if (id !== undefined) mcpReplyError(id, -32000, settings.rpcErrorText);
+    return;
+  }
+  if (method === "initialize") {
+    mcpReply(id, { protocolVersion: settings.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "sentrux", version: settings.serverVersion } });
+    maybeEmitGarbage(settings, state, "initialize");
+    return;
+  }
+  if (method === "notifications/initialized") {
+    maybeEmitGarbage(settings, state, "notifications/initialized");
+    return;
+  }
+  if (method === "tools/list") {
+    mcpReply(id, { tools: mcpToolList(settings) });
+    maybeEmitGarbage(settings, state, "tools/list");
+    return;
+  }
+  if (method === "ping") {
+    mcpReply(id, {});
+    maybeEmitGarbage(settings, state, "ping");
+    return;
+  }
+  if (method === "tools/call") {
+    handleToolsCall(settings, state, id, params);
+    return;
+  }
+  if (id !== undefined) {
+    mcpReplyError(id, -32601, `Unknown method: ${method}`);
+  }
+}
+
+function handleToolsCall(settings, state, id, params) {
+  const name = params?.name;
+  const callArgs = params?.arguments ?? {};
+  if (settings.crashTool && name === settings.crashTool) {
+    process.exit(1);
+  }
+  if (settings.hangTool && name === settings.hangTool) {
+    return;
+  }
+  if (!settings.allTools.includes(name) || name === settings.missingTool) {
+    mcpReply(id, { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true });
+    return;
+  }
+  if (settings.errorTool && name === settings.errorTool) {
+    mcpReply(id, { content: [{ type: "text", text: settings.errorText }], isError: true });
+    return;
+  }
+  const result = mcpToolResult(name, callArgs, state);
+  if (result && result.errorText) {
+    mcpReply(id, { content: [{ type: "text", text: result.errorText }], isError: true });
+    return;
+  }
+  mcpReply(id, { content: [{ type: "text", text: JSON.stringify(result) }] });
+  maybeEmitGarbage(settings, state, "tools/call");
 }

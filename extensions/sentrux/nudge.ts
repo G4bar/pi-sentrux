@@ -134,6 +134,241 @@ function nudgeKey(cwd: string): string {
   }
 }
 
+/** Per-registration state shared by the four nudge hooks. */
+interface NudgeRunState {
+  cache: Map<string, NudgeMeasurement>;
+  inFlight: Map<string, Promise<NudgeMeasurement | undefined>>;
+  /** Agent-run epoch: `before_agent_start` bumps it and drops pending baselines, so a
+   * new run never reuses the previous run's pending baseline promise — and a stale
+   * baseline that settles late cannot overwrite the new run's cache entry. */
+  runEpoch: number;
+  dirty: Set<string>;
+  /** Roots whose baseline wait already ran this agent run: the pre-edit wait costs
+   * at most one wait per root per run, not 30 s on every later edit. Reset on
+   * before_agent_start alongside `dirty`/`nudgedInRun`. */
+  waited: Set<string>;
+  nudgedInRun: boolean;
+}
+
+/** A nudge rescan shares the per-root MCP server with sentrux_session; on a call
+ * timeout the server is killed and the session baseline is lost. Skip nudge scans
+ * while a session baseline is active for that root instead of destroying it. */
+function hasActiveSession(deps: NudgeDeps, root: string): boolean {
+  try {
+    return deps.registry.getHandleInfo(root)?.hasSession ?? false;
+  } catch {
+    return false;
+  }
+}
+
+async function measureRoot(deps: NudgeDeps, root: string): Promise<NudgeMeasurement | undefined> {
+  if (hasActiveSession(deps, root)) return undefined;
+  try {
+    const client = await deps.registry.getClient(root);
+    const opts = { timeoutMs: callTimeoutMs(deps) };
+    const scan = await client.callTool<ScanResult>("scan", { path: root }, opts);
+    const health = await client.callTool<HealthResult>("health", {}, opts);
+    return toMeasurement(scan, health);
+  } catch {
+    return undefined;
+  }
+}
+
+async function baselineScan(
+  state: NudgeRunState,
+  deps: NudgeDeps,
+  root: string,
+  epoch: number,
+): Promise<NudgeMeasurement | undefined> {
+  try {
+    const m = await measureRoot(deps, root);
+    // A previous run's baseline settling after the run boundary must not
+    // overwrite the new run's cache entry.
+    if (m && epoch === state.runEpoch) state.cache.set(root, m);
+    return m;
+  } catch {
+    return undefined;
+  }
+}
+
+function startBaseline(state: NudgeRunState, deps: NudgeDeps, root: string): void {
+  if (state.cache.has(root) || state.inFlight.has(root)) return;
+  const p = baselineScan(state, deps, root, state.runEpoch);
+  state.inFlight.set(root, p);
+  // Deliberately not awaited: warm-up style; tool_call awaits it when needed.
+  // The guard keeps a late-settling promise from evicting a newer run's entry.
+  void p.catch(() => undefined).finally(() => {
+    if (state.inFlight.get(root) === p) state.inFlight.delete(root);
+  });
+}
+
+function isEditTool(toolName: string): boolean {
+  return toolName === "edit" || toolName === "write";
+}
+
+function awaitBaseline(
+  pending: Promise<NudgeMeasurement | undefined>,
+  signal: AbortSignal | undefined,
+): Promise<NudgeMeasurement | undefined> {
+  return Promise.race([withTimeout(pending, BASELINE_AWAIT_TIMEOUT_MS), onSignalAbort(signal)]);
+}
+
+function onBeforeAgentStart(state: NudgeRunState, deps: NudgeDeps, ctx: ExtensionContext): void {
+  state.nudgedInRun = false;
+  state.dirty.clear();
+  state.waited.clear();
+  // Fresh baseline every run: the cache would otherwise blame the agent for edits
+  // the user made between runs. The epoch bump also retires the previous run's
+  // pending baseline (a new one starts below) and blocks its late cache write.
+  state.runEpoch += 1;
+  state.cache.clear();
+  state.inFlight.clear();
+  if (!isNudgeEnabled(deps)) return;
+  try {
+    const root = nudgeKey(ctx.cwd);
+    if (!state.cache.has(root) && !state.inFlight.has(root)) {
+      startBaseline(state, deps, root);
+    }
+  } catch {
+    // Hooks never throw.
+  }
+}
+
+async function onToolCall(
+  state: NudgeRunState,
+  deps: NudgeDeps,
+  event: { toolName: string },
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (!isNudgeEnabled(deps)) return;
+  if (!isEditTool(event.toolName)) return;
+  let root: string;
+  try {
+    root = nudgeKey(ctx.cwd);
+  } catch {
+    // Hooks never throw.
+    return;
+  }
+  // At most one pre-edit wait per root per run; later edits reuse the baseline.
+  if (state.waited.has(root)) return;
+  state.waited.add(root);
+  const pending = state.inFlight.get(root);
+  if (!pending) return;
+  try {
+    // Awaited before the edit runs: guarantees a pre-edit baseline. Races the
+    // host abort signal so ESC interrupts the wait instead of spinning 30 s.
+    await awaitBaseline(pending, ctx.signal);
+  } catch {
+    // Hooks never throw.
+  }
+}
+
+function onToolResult(
+  state: NudgeRunState,
+  deps: NudgeDeps,
+  event: { toolName: string; isError?: boolean },
+  ctx: ExtensionContext,
+): void {
+  if (!isNudgeEnabled(deps)) return;
+  if (!isEditTool(event.toolName)) return;
+  if (event.isError) return;
+  try {
+    state.dirty.add(nudgeKey(ctx.cwd));
+  } catch {
+    // Hooks never throw.
+  }
+}
+
+function onAgentEnd(pi: ExtensionAPI, state: NudgeRunState, deps: NudgeDeps, ctx: ExtensionContext): void {
+  if (!isNudgeEnabled(deps)) return;
+  if (state.nudgedInRun) return;
+  void rescanAndNudge(pi, state, deps, ctx).catch(() => undefined);
+}
+
+async function rescanAndNudge(
+  pi: ExtensionAPI,
+  state: NudgeRunState,
+  deps: NudgeDeps,
+  ctx: ExtensionContext,
+): Promise<void> {
+  let root: string;
+  try {
+    root = nudgeKey(ctx.cwd);
+  } catch {
+    // Hooks never throw.
+    return;
+  }
+  if (!state.dirty.has(root)) return;
+  state.dirty.delete(root);
+  if (hasActiveSession(deps, root)) return;
+  // The rescan + nudge run in the background: agent_end delays idle, and this
+  // outer void already makes the whole block fire-and-forget.
+  const before = await resolveBaselineBefore(state, root, ctx);
+  let after: NudgeMeasurement | undefined;
+  try {
+    after = await measureRoot(deps, root);
+  } catch {
+    after = undefined;
+  }
+  if (!after) return;
+  if (!before) {
+    state.cache.set(root, after);
+    return;
+  }
+  state.cache.set(root, after);
+  const threshold = nudgeThreshold(deps);
+  const decision = shouldNudge(before, after, threshold);
+  if (!decision) return;
+  if (state.nudgedInRun) return;
+  state.nudgedInRun = true;
+  const content = formatNudgeMessage(before, after);
+  const details: NudgeDetails = {
+    root,
+    before,
+    after,
+    delta: after.quality - before.quality,
+    threshold,
+    reason: decision.reason,
+  };
+  deliverNudge(pi, ctx, details, content, after, after.quality - before.quality);
+}
+
+async function resolveBaselineBefore(
+  state: NudgeRunState,
+  root: string,
+  ctx: ExtensionContext,
+): Promise<NudgeMeasurement | undefined> {
+  const cached = state.cache.get(root);
+  if (cached) return cached;
+  const pending = state.inFlight.get(root);
+  if (!pending) return undefined;
+  try {
+    return (await awaitBaseline(pending, ctx.signal)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function deliverNudge(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  details: NudgeDetails,
+  content: string,
+  after: NudgeMeasurement,
+  delta: number,
+): void {
+  try {
+    pi.sendMessage({ customType: "sentrux-nudge", content, display: true, details }, { deliverAs: "nextTurn" });
+  } catch {
+    // sendMessage on a torn-down session throws; nothing to do.
+  }
+  try {
+    (ctx as ExtensionContext).ui.setStatus("sentrux", formatNudgeStatus(after, delta));
+  } catch {
+    // Stale ctx after shutdown; safe to ignore like the warm-up path.
+  }
+}
+
 /**
  * Opt-in post-edit nudge (§6.6). Off by default; enabled with `nudge:"agent_end"`.
  *
@@ -144,178 +379,16 @@ function nudgeKey(cwd: string): string {
  * (`before_agent_start` → `agent_end`).
  */
 export function registerNudgeHooks(pi: ExtensionAPI, deps: NudgeDeps): void {
-  const cache = new Map<string, NudgeMeasurement>();
-  const inFlight = new Map<string, Promise<NudgeMeasurement | undefined>>();
-  /** Agent-run epoch: `before_agent_start` bumps it and drops pending baselines, so a
-   * new run never reuses the previous run's pending baseline promise — and a stale
-   * baseline that settles late cannot overwrite the new run's cache entry. */
-  let runEpoch = 0;
-  const dirty = new Set<string>();
-  /** Roots whose baseline wait already ran this agent run: the pre-edit wait costs
-   * at most one wait per root per run, not 30 s on every later edit. Reset on
-   * before_agent_start alongside `dirty`/`nudgedInRun`. */
-  const waited = new Set<string>();
-  let nudgedInRun = false;
-
-  /** A nudge rescan shares the per-root MCP server with sentrux_session; on a call
-   * timeout the server is killed and the session baseline is lost. Skip nudge scans
-   * while a session baseline is active for that root instead of destroying it. */
-  function hasActiveSession(root: string): boolean {
-    try {
-      return deps.registry.getHandleInfo(root)?.hasSession ?? false;
-    } catch {
-      return false;
-    }
-  }
-
-  async function measure(root: string): Promise<NudgeMeasurement | undefined> {
-    if (hasActiveSession(root)) return undefined;
-    try {
-      const client = await deps.registry.getClient(root);
-      const opts = { timeoutMs: callTimeoutMs(deps) };
-      const scan = await client.callTool<ScanResult>("scan", { path: root }, opts);
-      const health = await client.callTool<HealthResult>("health", {}, opts);
-      return toMeasurement(scan, health);
-    } catch {
-      return undefined;
-    }
-  }
-
-  async function baselineScan(root: string, epoch: number): Promise<NudgeMeasurement | undefined> {
-    try {
-      const m = await measure(root);
-      // A previous run's baseline settling after the run boundary must not
-      // overwrite the new run's cache entry.
-      if (m && epoch === runEpoch) cache.set(root, m);
-      return m;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function startBaseline(root: string): void {
-    if (cache.has(root) || inFlight.has(root)) return;
-    const p = baselineScan(root, runEpoch);
-    inFlight.set(root, p);
-    // Deliberately not awaited: warm-up style; tool_call awaits it when needed.
-    // The guard keeps a late-settling promise from evicting a newer run's entry.
-    void p.catch(() => undefined).finally(() => {
-      if (inFlight.get(root) === p) inFlight.delete(root);
-    });
-  }
-
-  pi.on("before_agent_start", (_event, ctx) => {
-    nudgedInRun = false;
-    dirty.clear();
-    waited.clear();
-    // Fresh baseline every run: the cache would otherwise blame the agent for edits
-    // the user made between runs. The epoch bump also retires the previous run's
-    // pending baseline (a new one starts below) and blocks its late cache write.
-    runEpoch += 1;
-    cache.clear();
-    inFlight.clear();
-    if (!isNudgeEnabled(deps)) return;
-    try {
-      const root = nudgeKey(ctx.cwd);
-      if (!cache.has(root) && !inFlight.has(root)) {
-        startBaseline(root);
-      }
-    } catch {
-      // Hooks never throw.
-    }
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (!isNudgeEnabled(deps)) return;
-    if (event.toolName !== "edit" && event.toolName !== "write") return;
-    let root: string;
-    try {
-      root = nudgeKey(ctx.cwd);
-    } catch {
-      // Hooks never throw.
-      return;
-    }
-    // At most one pre-edit wait per root per run; later edits reuse the baseline.
-    if (waited.has(root)) return;
-    waited.add(root);
-    const pending = inFlight.get(root);
-    if (!pending) return;
-    try {
-      // Awaited before the edit runs: guarantees a pre-edit baseline. Races the
-      // host abort signal so ESC interrupts the wait instead of spinning 30 s.
-      await Promise.race([withTimeout(pending, BASELINE_AWAIT_TIMEOUT_MS), onSignalAbort(ctx.signal)]);
-    } catch {
-      // Hooks never throw.
-    }
-  });
-
-  pi.on("tool_result", (event, ctx) => {
-    if (!isNudgeEnabled(deps)) return;
-    if (event.toolName !== "edit" && event.toolName !== "write") return;
-    if (event.isError) return;
-    try {
-      dirty.add(nudgeKey(ctx.cwd));
-    } catch {
-      // Hooks never throw.
-    }
-  });
-
-  pi.on("agent_end", (_event, ctx) => {
-    if (!isNudgeEnabled(deps)) return;
-    if (nudgedInRun) return;
-    void (async () => {
-      let root: string;
-      try {
-        root = nudgeKey(ctx.cwd);
-      } catch {
-        // Hooks never throw.
-        return;
-      }
-      if (!dirty.has(root)) return;
-      dirty.delete(root);
-      if (hasActiveSession(root)) return;
-      // The rescan + nudge run in the background: agent_end delays idle, and this
-      // outer void already makes the whole block fire-and-forget.
-      let before = cache.get(root);
-      if (!before) {
-        const pending = inFlight.get(root);
-        if (pending) {
-          try {
-            before = (await Promise.race([withTimeout(pending, BASELINE_AWAIT_TIMEOUT_MS), onSignalAbort(ctx.signal)])) ?? undefined;
-          } catch {
-            before = undefined;
-          }
-        }
-      }
-      let after: NudgeMeasurement | undefined;
-      try {
-        after = await measure(root);
-      } catch {
-        after = undefined;
-      }
-      if (!after) return;
-      if (!before) {
-        cache.set(root, after);
-        return;
-      }
-      cache.set(root, after);
-      const threshold = nudgeThreshold(deps);
-      const decision = shouldNudge(before, after, threshold);
-      if (!decision) return;
-      if (nudgedInRun) return;
-      nudgedInRun = true;
-      const content = formatNudgeMessage(before, after);
-      const details: NudgeDetails = { root, before, after, delta: after.quality - before.quality, threshold, reason: decision.reason };
-      try {
-        pi.sendMessage({ customType: "sentrux-nudge", content, display: true, details }, { deliverAs: "nextTurn" });
-      } catch {
-        // sendMessage on a torn-down session throws; nothing to do.
-      }
-      try {
-        (ctx as ExtensionContext).ui.setStatus("sentrux", formatNudgeStatus(after, after.quality - before.quality));
-      } catch {
-        // Stale ctx after shutdown; safe to ignore like the warm-up path.
-      }
-    })().catch(() => undefined);
-  });
+  const state: NudgeRunState = {
+    cache: new Map(),
+    inFlight: new Map(),
+    runEpoch: 0,
+    dirty: new Set(),
+    waited: new Set(),
+    nudgedInRun: false,
+  };
+  pi.on("before_agent_start", (_event, ctx) => onBeforeAgentStart(state, deps, ctx));
+  pi.on("tool_call", (event, ctx) => onToolCall(state, deps, event, ctx));
+  pi.on("tool_result", (event, ctx) => onToolResult(state, deps, event, ctx));
+  pi.on("agent_end", (_event, ctx) => onAgentEnd(pi, state, deps, ctx));
 }

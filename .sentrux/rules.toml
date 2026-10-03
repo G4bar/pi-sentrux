@@ -1,0 +1,52 @@
+# pi-sentrux architecture rules, checked by `sentrux check` (Sentrux v0.5.7) via sentrux_check_rules.
+#
+# Layer direction in v0.5.7 (verified, see skills/sentrux/SKILL.md section 5.2): a file in a layer
+# with a HIGHER `order` must not import a file in a layer with a LOWER `order`. Same-order imports
+# are allowed and files that match no layer are ignored. So the entry point has the lowest order
+# and the leaf modules the highest. Globs: exact paths match exactly; `dir/**` covers a subtree.
+
+[constraints]
+min_quality = 0.60            # 0-1 scale; 0.593 before the arch fixes, 0.637 after phases 1-5. Ratchet up after phase 6.
+max_cycles = 0
+max_cc = 15                   # applies to tests and fixtures too
+no_god_files = true           # fan-out > 15; current max internal fan-out is 7
+max_upward_violations = 0
+# max_file_lines omitted: v0.5.7 counts package-lock.json (3338 lines), so any useful limit
+# would always fail. Largest code file: extensions/sentrux/tools.ts (~764 lines).
+
+[[layers]]
+name = "tests"
+paths = ["test/**"]
+order = 0
+
+[[layers]]
+name = "entry"
+paths = ["extensions/sentrux/index.ts"]
+order = 1
+
+[[layers]]
+name = "surface"
+paths = ["extensions/sentrux/tools.ts", "extensions/sentrux/commands.ts", "extensions/sentrux/nudge.ts"]
+order = 2
+
+[[layers]]
+name = "runtime"
+paths = [
+  "extensions/sentrux/servers.ts",
+  "extensions/sentrux/mcp-client.ts",
+  "extensions/sentrux/cli.ts",
+  "extensions/sentrux/install.ts",
+  "extensions/sentrux/git.ts",
+  "extensions/sentrux/binary.ts",
+]
+order = 3
+
+[[layers]]
+name = "foundation"
+paths = ["extensions/sentrux/process.ts", "extensions/sentrux/format.ts", "extensions/sentrux/config.ts", "extensions/sentrux/types.ts"]
+order = 4
+
+[[boundaries]]
+from = "extensions/**"
+to = "test/**"
+reason = "shipped extension code must not import tests or fixtures"

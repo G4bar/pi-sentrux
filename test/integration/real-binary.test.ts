@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { access, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type SentruxConfig } from "../../extensions/sentrux/config.ts";
+import { pathExists } from "../../extensions/sentrux/binary.ts";
+import { makeCtx, makeFakePi } from "../helpers.ts";
 import { McpClient } from "../../extensions/sentrux/mcp-client.ts";
 import { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
 import {
@@ -21,25 +23,6 @@ const MAKE_FIXTURE_REPO = join(import.meta.dirname, "..", "fixtures", "v0.5.7", 
 const P0L_RULES_TOML = ["[[layers]]", 'name = "core"', 'paths = ["src/core/*"]', "order = 0", "", "[[layers]]", 'name = "app"', 'paths = ["src/app/*"]', "order = 1", ""].join(
   "\n",
 );
-
-function makeFakePi() {
-  const registered: Record<string, any> = {};
-  const pi = { registerTool: (tool: any) => { registered[tool.name] = tool; } } as any;
-  return { pi, registered };
-}
-
-function makeCtx(cwd: string): any {
-  return { cwd };
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 describe.skipIf(!SENTRUX_BIN)("real-binary integration (SENTRUX_BIN)", () => {
   const roots: string[] = [];
@@ -143,16 +126,16 @@ describe.skipIf(!SENTRUX_BIN)("real-binary integration (SENTRUX_BIN)", () => {
       registerGateTool(pi, makeDeps());
 
       const baselinePath = join(root, ".sentrux", "baseline.json");
-      expect(await exists(baselinePath)).toBe(false);
+      expect(await pathExists(baselinePath)).toBe(false);
 
       const noBaseline = await registered.sentrux_gate.execute("call-nobaseline", {}, undefined, undefined, makeCtx(root));
       expect(noBaseline.details.status).toBe("no_baseline");
       expect(noBaseline.content[0].text).toContain("call sentrux_gate save=true first");
-      expect(await exists(baselinePath)).toBe(false);
+      expect(await pathExists(baselinePath)).toBe(false);
 
       const saved = await registered.sentrux_gate.execute("call-save", { save: true }, undefined, undefined, makeCtx(root));
       expect(saved.details.status).toBe("saved");
-      expect(await exists(baselinePath)).toBe(true);
+      expect(await pathExists(baselinePath)).toBe(true);
       const onDisk = JSON.parse(await readFile(baselinePath, "utf8"));
       expect(onDisk).toHaveProperty("quality_signal");
       expect(onDisk).toHaveProperty("cycle_count");

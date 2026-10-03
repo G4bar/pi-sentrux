@@ -1,7 +1,7 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import type { BinaryStatus } from "./binary.ts";
-import { resolveBinary } from "./binary.ts";
+import { resolveBinary, warmupFailureStatus } from "./binary.ts";
 import { registerStatusCommand } from "./commands.ts";
 import { DEFAULT_CONFIG, loadConfig, sentruxChildEnv, type SentruxConfig } from "./config.ts";
 import { McpClient } from "./mcp-client.ts";
@@ -30,20 +30,6 @@ function trackRegistryForExit(registry: McpServerRegistry): void {
       }
     }
   });
-}
-
-/** Maps a warm-up failure to the §6.6 status line: version on success,
- * `"sentrux: not executable"` for a chmod problem, `"sentrux: missing libs"` for
- * the GTK/X11 loader failure, `"sentrux: not found"` otherwise. */
-export function warmupFailureStatus(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err ?? "");
-  if (/not executable/i.test(message)) {
-    return "sentrux: not executable";
-  }
-  if (/cannot start|missing|shared librar/i.test(message)) {
-    return "sentrux: missing libs";
-  }
-  return "sentrux: not found";
 }
 
 async function runWarmup(promise: Promise<BinaryStatus>, setStatus: (key: string, text: string | undefined) => void): Promise<void> {

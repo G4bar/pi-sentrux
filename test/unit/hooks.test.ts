@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { warmupFailureStatus } from "../../extensions/sentrux/index.ts";
+import { warmupFailureStatus } from "../../extensions/sentrux/binary.ts";
 
 describe("warmupFailureStatus (§6.6)", () => {
   it("maps the not-found error to 'sentrux: not found'", () => {

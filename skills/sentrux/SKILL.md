@@ -148,7 +148,11 @@ subtree.
 ### 5.6 Starter template
 
 Copy this to `.sentrux/rules.toml` and adjust the thresholds. Keep `**` globs
-when you want whole subtrees covered.
+when you want whole subtrees covered. Give the most foundational layer the
+**highest** `order`: here `app` (order 0) may import `core` (order 1), while
+`core` importing `app` is flagged by both the layer rule and the boundary.
+The boundary repeats the layer rule on purpose: it carries a custom reason,
+and keeping both shows each syntax.
 
 ```toml
 [constraints]
@@ -159,13 +163,13 @@ no_god_files = true
 max_upward_violations = 0
 
 [[layers]]
-name = "core"
-paths = ["src/core/**"]
+name = "app"
+paths = ["src/app/**"]
 order = 0
 
 [[layers]]
-name = "app"
-paths = ["src/app/**"]
+name = "core"
+paths = ["src/core/**"]
 order = 1
 
 [[boundaries]]

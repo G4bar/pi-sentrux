@@ -1,8 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { findMissingSharedLibraries, NOT_FOUND_MESSAGE, resolveBinary, type BinaryStatus } from "./binary.ts";
+import { findMissingSharedLibraries, NOT_FOUND_MESSAGE, pathExists, resolveBinary, type BinaryStatus } from "./binary.ts";
 import type { SentruxConfig } from "./config.ts";
 import { DEFAULT_CONFIG } from "./config.ts";
 import { ensureTelemetryOptOut, formatUnsupportedPlatformMessage, getReleaseEntry, installBinary, installTargetPath, type InstallBinaryOptions } from "./install.ts";
@@ -14,15 +13,6 @@ export interface StatusDeps {
   agentDir: string;
   globalConfigPath: string;
   registry: McpServerRegistry;
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function sourceLabel(status: BinaryStatus): string {

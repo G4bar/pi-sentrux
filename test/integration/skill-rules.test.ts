@@ -115,7 +115,7 @@ describe.skipIf(!SENTRUX_BIN)("skill rules.toml examples (real binary)", () => {
     expect(stdout).toContain("src/core/uses_app.ts");
   });
 
-  it("starter template uses ** for subtrees (nested imports flagged, unlike * above)", async () => {
+  it("starter template lets app import core, flags core importing app, and ** covers subtrees", async () => {
     const text = await readFile(SKILL_PATH, "utf8");
     const blocks = extractTomlBlocks(text);
     const root = await makeFixtureRoot();
@@ -128,8 +128,14 @@ describe.skipIf(!SENTRUX_BIN)("skill rules.toml examples (real binary)", () => {
     expect(stdout).toContain("7 rules checked");
     expect(stdout).toContain("layer_direction");
     expect(stdout).toContain("boundary");
+    // app->core imports are allowed now: neither the shallow nor the nested
+    // app file may appear.
+    expect(stdout).not.toContain("uses_nested_core.ts");
+    expect(stdout).not.toContain("src/app/uses_core.ts");
+    // core->app imports are flagged by both the layer rule and the boundary.
+    expect(stdout).toContain("core must not depend on app");
+    expect(stdout).toContain("src/core/uses_app.ts");
     // Proof that `**` covers one level deeper where `*` did not.
-    expect(stdout).toContain("uses_nested_core.ts");
     expect(stdout).toContain("uses_nested_app.ts");
   });
 

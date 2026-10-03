@@ -44,13 +44,6 @@ export function normalizeCliOutput(text: string): string {
 
 const ARROW = "(?:->|\u2192)";
 
-function stderrTail(stderr: string, maxLines = 5): string {
-  const lines = stderr.split("\n").filter((line) => line.length > 0);
-  return lines.slice(-maxLines).join("\n");
-}
-
-export { stderrTail };
-
 // -- check --
 
 const CHECK_HEADER_RE = /^sentrux check [\u2014-] (\d+) rules checked$/m;

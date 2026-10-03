@@ -1,17 +1,16 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { access, readFile, realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Type } from "typebox";
-import { resolveBinary, type BinaryStatus, type ParsedVersion } from "./binary.ts";
+import { pathExists, resolveBinary, stderrTail, type BinaryStatus, type ParsedVersion } from "./binary.ts";
 import {
   runCheck,
   runGate,
   parseCheckOutput,
   parseGateCompareOutput,
   parseGateSaveOutput,
-  stderrTail,
   type CheckViolation,
   type CliCommand,
   type GateCompareOutcome,
@@ -58,13 +57,9 @@ const PathParam = Type.Optional(
   Type.String({ description: "Directory to analyze (absolute or relative to the working directory). Default: working directory." }),
 );
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+async function textResult<D>(toolCallId: string, text: string, details: D, config: SentruxConfig): Promise<AgentToolResult<D>> {
+  const modelText = await buildModelText({ toolCallId, text, details, maxBytes: config.maxOutputBytes, maxLines: config.maxOutputLines });
+  return { content: [{ type: "text", text: modelText }], details };
 }
 
 async function resolveRoot(cwd: string, path: string | undefined): Promise<string> {
@@ -239,14 +234,7 @@ export function registerCheckRulesTool(pi: ExtensionAPI, deps: SentruxToolDeps):
           quality: null,
           violations: [],
         };
-        const text = await buildModelText({
-          toolCallId,
-          text: lines.join("\n"),
-          details,
-          maxBytes: config.maxOutputBytes,
-          maxLines: config.maxOutputLines,
-        });
-        return { content: [{ type: "text", text }], details };
+        return textResult(toolCallId, lines.join("\n"), details, config);
       }
 
       const result = await runCheck(cli, root, { cwd: root, timeoutMs: config.cliTimeoutMs, signal, env: sentruxChildEnv(config) });
@@ -289,14 +277,7 @@ export function registerCheckRulesTool(pi: ExtensionAPI, deps: SentruxToolDeps):
         quality,
         violations,
       };
-      const text = await buildModelText({
-        toolCallId,
-        text: lines.join("\n"),
-        details,
-        maxBytes: config.maxOutputBytes,
-        maxLines: config.maxOutputLines,
-      });
-      return { content: [{ type: "text", text }], details };
+      return textResult(toolCallId, lines.join("\n"), details, config);
     },
   });
 }
@@ -372,14 +353,7 @@ async function finishGateCompare(
     distance: outcome.distance,
     reasons: status === "degraded" ? outcome.reasons : undefined,
   };
-  const text = await buildModelText({
-    toolCallId,
-    text: lines.join("\n"),
-    details,
-    maxBytes: config.maxOutputBytes,
-    maxLines: config.maxOutputLines,
-  });
-  return { content: [{ type: "text", text }], details };
+  return textResult(toolCallId, lines.join("\n"), details, config);
 }
 
 export function registerGateTool(pi: ExtensionAPI, deps: SentruxToolDeps): void {
@@ -436,14 +410,7 @@ export function registerGateTool(pi: ExtensionAPI, deps: SentruxToolDeps): void 
           quality: { before: outcome.quality, after: outcome.quality },
           baseline,
         };
-        const text = await buildModelText({
-          toolCallId,
-          text: lines.join("\n"),
-          details,
-          maxBytes: config.maxOutputBytes,
-          maxLines: config.maxOutputLines,
-        });
-        return { content: [{ type: "text", text }], details };
+        return textResult(toolCallId, lines.join("\n"), details, config);
       }
 
       const result = await runGate(cli, root, false, { cwd: root, timeoutMs: config.cliTimeoutMs, signal, env: sentruxChildEnv(config) });
@@ -467,14 +434,7 @@ export function registerGateTool(pi: ExtensionAPI, deps: SentruxToolDeps): void 
           status: "no_baseline",
           baselinePath,
         };
-        const text = await buildModelText({
-          toolCallId,
-          text: lines.join("\n"),
-          details,
-          maxBytes: config.maxOutputBytes,
-          maxLines: config.maxOutputLines,
-        });
-        return { content: [{ type: "text", text }], details };
+        return textResult(toolCallId, lines.join("\n"), details, config);
       }
       throw new Error(`sentrux gate failed: ${cliFailureDetail(result)}`);
     },
@@ -533,14 +493,7 @@ export function registerScanTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps): vo
         untracked: { count: untrackedFiles.length, sample: untrackedFiles.slice(0, UNTRACKED_SAMPLE_LIMIT) },
         tier: health.upgrade ? "free" : "pro",
       };
-      const text = await buildModelText({
-        toolCallId,
-        text: lines.join("\n"),
-        details,
-        maxBytes: config.maxOutputBytes,
-        maxLines: config.maxOutputLines,
-      });
-      return { content: [{ type: "text", text }], details };
+      return textResult(toolCallId, lines.join("\n"), details, config);
     },
   });
 }
@@ -600,14 +553,7 @@ export function registerSessionTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps):
 
       const finish = async (lines: string[], details: SentruxSessionDetails): Promise<AgentToolResult<SentruxSessionDetails>> => {
         const ordered = [...(warning ? [warning] : []), ...lines];
-        const text = await buildModelText({
-          toolCallId,
-          text: ordered.join("\n"),
-          details,
-          maxBytes: config.maxOutputBytes,
-          maxLines: config.maxOutputLines,
-        });
-        return { content: [{ type: "text", text }], details };
+        return textResult(toolCallId, ordered.join("\n"), details, config);
       };
 
       if (params.action === "start") {
@@ -750,14 +696,7 @@ export function registerInsightsTool(pi: ExtensionAPI, deps: SentruxMcpToolDeps)
       // (typebox 1.3.27); the tool's runtime schema validation already restricts params.kind
       // to one of the three branches handled above.
       const details: SentruxInsightsDetails = { root, kind: params.kind as "dsm" | "test_gaps" | "git_stats", result };
-      const modelText = await buildModelText({
-        toolCallId,
-        text: lines.join("\n"),
-        details,
-        maxBytes: config.maxOutputBytes,
-        maxLines: config.maxOutputLines,
-      });
-      return { content: [{ type: "text", text: modelText }], details };
+      return textResult(toolCallId, lines.join("\n"), details, config);
     },
   });
 }

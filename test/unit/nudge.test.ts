@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_CONFIG, type SentruxConfig } from "../../extensions/sentrux/config.ts";
 import type { HealthResult, ScanResult } from "../../extensions/sentrux/format.ts";
 import {
   formatNudgeMessage,
@@ -9,6 +8,7 @@ import {
   toMeasurement,
   worstRootCauseDrop,
 } from "../../extensions/sentrux/nudge.ts";
+import { makeConfig, makeFakeMcpClient, scanHealthCallTool } from "../helpers.ts";
 
 function makeHealth(overrides: Partial<HealthResult> = {}): HealthResult {
   return {
@@ -33,10 +33,6 @@ function makeScan(quality = 7000): ScanResult {
 
 function makeCtx(cwd: string, signal?: AbortSignal) {
   return { cwd, signal, ui: { setStatus: vi.fn(), notify: vi.fn() } } as any;
-}
-
-function makeConfig(overrides: Partial<SentruxConfig> = {}): SentruxConfig {
-  return { ...DEFAULT_CONFIG, ...overrides };
 }
 
 interface CapturedPi {
@@ -76,20 +72,7 @@ function makeRegistry(sequence: { scan: ScanResult; health: HealthResult }[], tr
       this.getClientCalls++;
       if (tracker) tracker.getClientCalls++;
       const step = sequence[Math.min(index, sequence.length - 1)];
-      return {
-        generation: 0,
-        pid: 1234,
-        isAlive: true,
-        start: async () => undefined,
-        close: async () => undefined,
-        forceKillSync: () => undefined,
-        callTool: async <T>(name: string): Promise<T> => {
-          calls.push(name);
-          if (name === "scan") return step.scan as unknown as T;
-          if (name === "health") return step.health as unknown as T;
-          throw new Error(`unexpected tool ${name}`);
-        },
-      } as any;
+      return makeFakeMcpClient({ pid: 1234, callTool: scanHealthCallTool(step, calls) }) as any;
     },
     __advance() {
       index++;
@@ -205,20 +188,7 @@ describe("registerNudgeHooks", () => {
       async getClient() {
         this.getClientCalls++;
         const step = steps[stepIndex];
-        return {
-          generation: 0,
-          pid: 4242,
-          isAlive: true,
-          start: async () => undefined,
-          close: async () => undefined,
-          forceKillSync: () => undefined,
-          callTool: async <T>(name: string): Promise<T> => {
-            toolCalls.push(name);
-            if (name === "scan") return step.scan as unknown as T;
-            if (name === "health") return step.health as unknown as T;
-            throw new Error(`unexpected tool ${name}`);
-          },
-        } as any;
+        return makeFakeMcpClient({ pid: 4242, callTool: scanHealthCallTool(step, toolCalls) }) as any;
       },
     } as any;
     const config = makeConfig({ nudge: "agent_end", nudgeThreshold: 200 });
@@ -536,5 +506,44 @@ describe("registerNudgeHooks", () => {
     // before=2000 (run 2), after=1500: a 500-point drop, not the stale 1000.
     expect(captured.sentMessages).toHaveLength(1);
     expect(captured.sentMessages[0].message.content).toContain("2000 → 1500 (-500)");
+  });
+
+  it("agent_end with a throwing ctx.signal still nudges from the cached baseline", async () => {
+    const captured = makePi();
+    const steps = [
+      { scan: makeScan(7342), health: makeHealth({ quality_signal: 7342, bottleneck: "equality" }) },
+      { scan: makeScan(7010), health: makeHealth({ quality_signal: 7010, bottleneck: "equality" }) },
+    ];
+    let stepIndex = 0;
+    const registry = {
+      async getClient() {
+        const step = steps[stepIndex];
+        return makeFakeMcpClient({ pid: 4242, callTool: scanHealthCallTool(step, []) }) as any;
+      },
+    } as any;
+    const config = makeConfig({ nudge: "agent_end", nudgeThreshold: 200 });
+    registerNudgeHooks(captured.pi, { getConfig: () => config, registry });
+
+    const ctx = makeCtx("/root");
+    await emit(captured.handlers, "before_agent_start", { type: "before_agent_start" }, ctx);
+    await flush();
+    stepIndex = 1;
+    await emit(captured.handlers, "tool_call", { type: "tool_call", toolCallId: "e1", toolName: "edit" }, ctx);
+    await emit(captured.handlers, "tool_result", { type: "tool_result", toolCallId: "e1", toolName: "edit", isError: false }, ctx);
+
+    // A stale ctx throws on signal access; the cached baseline path must not read it.
+    const staleSignalCtx = {
+      cwd: "/root",
+      ui: { setStatus: vi.fn(), notify: vi.fn() },
+      get signal(): AbortSignal | undefined {
+        throw new Error("stale ctx");
+      },
+    } as any;
+    await expect(
+      emit(captured.handlers, "agent_end", { type: "agent_end", messages: [] }, staleSignalCtx),
+    ).resolves.toBeDefined();
+    await flush(50);
+    expect(captured.sentMessages).toHaveLength(1);
+    expect(captured.sentMessages[0].message.content).toContain("7342 → 7010 (-332)");
   });
 });

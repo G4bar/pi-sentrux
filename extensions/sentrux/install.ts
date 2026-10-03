@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { access, chmod, mkdir, open, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash, type Hash } from "node:crypto";
+import { access, chmod, mkdir, open, rename, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { managedInstallPath, validateBinary } from "./binary.ts";
@@ -107,6 +107,72 @@ async function removeIfExists(path: string): Promise<void> {
   }
 }
 
+function assertWithinLimit(bytes: number, maxBytes: number, url: string): void {
+  if (bytes > maxBytes) {
+    throw new Error(`download exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit (${url})`);
+  }
+}
+
+async function writeBody(
+  response: Response,
+  handle: FileHandle,
+  hash: Hash,
+  maxBytes: number,
+  url: string,
+): Promise<void> {
+  let bytes = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const buf = Buffer.from(value);
+        bytes += buf.length;
+        assertWithinLimit(bytes, maxBytes, url);
+        hash.update(buf);
+        await handle.write(buf);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } else {
+    const buf = Buffer.from(await response.arrayBuffer());
+    bytes = buf.length;
+    assertWithinLimit(bytes, maxBytes, url);
+    hash.update(buf);
+    await handle.write(buf);
+  }
+}
+
+async function downloadToTemp(
+  fetchFn: FetchFn,
+  entry: ReleaseEntry,
+  temp: string,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const response = await fetchFn(entry.url, { signal, redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`download failed: HTTP ${response.status} for ${entry.url}`);
+  }
+  const hash = createHash("sha256");
+  const handle = await open(temp, "wx");
+  try {
+    await writeBody(response, handle, hash, maxBytes, entry.url);
+  } finally {
+    await handle.close();
+  }
+  return hash.digest("hex");
+}
+
+async function verifyChecksum(actual: string, entry: ReleaseEntry, temp: string): Promise<void> {
+  if (actual.toLowerCase() !== entry.sha256.toLowerCase()) {
+    await removeIfExists(temp);
+    throw new Error(`checksum mismatch (expected ${entry.sha256}, got ${actual})`);
+  }
+}
+
 /**
  * Download the pinned v0.5.7 asset for this platform over HTTPS into a temp
  * file in the target directory, verify its sha256 while streaming, chmod +x,
@@ -148,50 +214,8 @@ export async function installBinary(options: InstallBinaryOptions): Promise<Inst
   timeoutTimer.unref?.();
 
   try {
-    const response = await fetchFn(entry.url, { signal: controller.signal, redirect: "follow" });
-    if (!response.ok) {
-      throw new Error(`download failed: HTTP ${response.status} for ${entry.url}`);
-    }
-
-    const hash = createHash("sha256");
-    let bytes = 0;
-    const handle = await open(temp, "wx");
-    try {
-      if (response.body) {
-        const reader = response.body.getReader();
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const buf = Buffer.from(value);
-            bytes += buf.length;
-            if (bytes > maxBytes) {
-              throw new Error(`download exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit (${entry.url})`);
-            }
-            hash.update(buf);
-            await handle.write(buf);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      } else {
-        const buf = Buffer.from(await response.arrayBuffer());
-        bytes = buf.length;
-        if (bytes > maxBytes) {
-          throw new Error(`download exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit (${entry.url})`);
-        }
-        hash.update(buf);
-        await handle.write(buf);
-      }
-    } finally {
-      await handle.close();
-    }
-
-    const actual = hash.digest("hex");
-    if (actual.toLowerCase() !== entry.sha256.toLowerCase()) {
-      await removeIfExists(temp);
-      throw new Error(`checksum mismatch (expected ${entry.sha256}, got ${actual})`);
-    }
+    const actual = await downloadToTemp(fetchFn, entry, temp, maxBytes, controller.signal);
+    await verifyChecksum(actual, entry, temp);
 
     await chmod(temp, 0o755);
     await rename(temp, target);

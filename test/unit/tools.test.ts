@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, type SentruxConfig } from "../../extensions/sentrux/config.ts";
+import type { SentruxConfig } from "../../extensions/sentrux/config.ts";
+import { pathExists } from "../../extensions/sentrux/binary.ts";
 import { registerCheckRulesTool, registerGateTool, type SentruxToolDeps } from "../../extensions/sentrux/tools.ts";
+import { makeConfig, makeCtx, makeFakePi } from "../helpers.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "fixtures", "v0.5.7");
 const FAKE_CLI = join(import.meta.dirname, "..", "fixtures", "fake-sentrux.mjs");
@@ -40,16 +42,6 @@ function gateScenario(dir: string) {
   return { FAKE_SENTRUX_SCENARIO_DIR: join(FIXTURES, "gate", dir) };
 }
 
-function makeFakePi() {
-  const registered: Record<string, any> = {};
-  const pi = { registerTool: (tool: any) => { registered[tool.name] = tool; } } as any;
-  return { pi, registered };
-}
-
-function makeCtx(cwd: string): any {
-  return { cwd };
-}
-
 function makeDeps(_binaryPath: string, config: SentruxConfig, cliOverride?: { command: string; prefixArgs?: string[] }): SentruxToolDeps {
   return {
     getConfig: () => config,
@@ -80,16 +72,7 @@ afterEach(async () => {
 });
 
 function fakeConfig(overrides: Partial<SentruxConfig> = {}): SentruxConfig {
-  return { ...DEFAULT_CONFIG, cliTimeoutMs: 5000, untrackedWarning: false, ...overrides };
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+  return makeConfig({ cliTimeoutMs: 5000, untrackedWarning: false, ...overrides });
 }
 
 describe("sentrux_check_rules", () => {
@@ -362,7 +345,7 @@ describe("sentrux_gate", () => {
       );
     });
 
-    expect(await exists(join(root, ".sentrux", "baseline.json"))).toBe(false);
+    expect(await pathExists(join(root, ".sentrux", "baseline.json"))).toBe(false);
   });
 
   it("save:true writes .sentrux/baseline.json and returns status saved with details.baseline", async () => {
@@ -379,7 +362,7 @@ describe("sentrux_gate", () => {
     expect(result.details.quality).toEqual({ before: 4674, after: 4674 });
 
     const baselinePath = join(root, ".sentrux", "baseline.json");
-    expect(await exists(baselinePath)).toBe(true);
+    expect(await pathExists(baselinePath)).toBe(true);
     const onDisk = JSON.parse(await readFile(baselinePath, "utf8"));
     expect(onDisk.quality_signal).toBeCloseTo(0.4674147779627381, 5);
     expect(result.details.baseline).toEqual(onDisk);
@@ -395,7 +378,7 @@ describe("sentrux_gate", () => {
       registered.sentrux_gate.execute("call-3", {}, undefined, undefined, makeCtx(root)),
     );
 
-    expect(await exists(join(root, ".sentrux", "baseline.json"))).toBe(false);
+    expect(await pathExists(join(root, ".sentrux", "baseline.json"))).toBe(false);
   });
 
   it("compare returns ok (does not throw) with no degradation", async () => {

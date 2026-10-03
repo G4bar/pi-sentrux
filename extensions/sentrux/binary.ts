@@ -37,7 +37,21 @@ export const NOT_FOUND_MESSAGE =
   "Sentrux binary not found. Install v0.5.7: `brew install sentrux/tap/sentrux`, a release binary " +
   "(https://github.com/sentrux/sentrux/releases/tag/v0.5.7), or run `/sentrux install`; or set SENTRUX_BIN.";
 
-async function pathExists(path: string): Promise<boolean> {
+/** Maps a warm-up failure to the §6.6 status line: version on success,
+ * `"sentrux: not executable"` for a chmod problem, `"sentrux: missing libs"` for
+ * the GTK/X11 loader failure, `"sentrux: not found"` otherwise. */
+export function warmupFailureStatus(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (/not executable/i.test(message)) {
+    return "sentrux: not executable";
+  }
+  if (/cannot start|missing|shared librar/i.test(message)) {
+    return "sentrux: missing libs";
+  }
+  return "sentrux: not found";
+}
+
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
@@ -192,7 +206,7 @@ export function formatVersionMismatchWarning(v: ParsedVersion): string {
   return `Sentrux ${v.major}.${v.minor}.${v.patch} detected; parsers verified for 0.5.7 only.`;
 }
 
-function stderrTail(stderr: string, maxLines = 5): string {
+export function stderrTail(stderr: string, maxLines = 5): string {
   const lines = stderr.split("\n").filter((line) => line.length > 0);
   return lines.slice(-maxLines).join("\n");
 }
@@ -252,10 +266,6 @@ interface CacheEntry {
 }
 
 const statusCache = new Map<string, CacheEntry>();
-
-export function clearBinaryStatusCache(): void {
-  statusCache.clear();
-}
 
 export interface ResolveBinaryOptions extends FindBinaryOptions {
   cliTimeoutMs?: number;
