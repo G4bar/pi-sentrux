@@ -1,5 +1,5 @@
 import { DEFAULT_CONFIG, type SentruxConfig } from "../extensions/sentrux/config.ts";
-import type { McpClientLike } from "../extensions/sentrux/types.ts";
+import type { McpClientLike } from "../extensions/sentrux/mcp/types.ts";
 
 export function makeFakePi() {
   const registered: Record<string, any> = {};

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseCheckOutput, parseGateCompareOutput, parseGateSaveOutput } from "../../extensions/sentrux/cli.ts";
+import { parseCheckOutput, parseGateCompareOutput, parseGateSaveOutput } from "../../extensions/sentrux/runtime/cli.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "fixtures", "v0.5.7");
 

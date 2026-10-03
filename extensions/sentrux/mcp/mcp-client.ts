@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import { buildInvocationArgs } from "./binary.ts";
-import type { CliCommand } from "./cli.ts";
-import { capThrownMessage } from "./format.ts";
+import { buildInvocationArgs } from "../runtime/binary.ts";
+import type { CliCommand } from "../runtime/cli.ts";
+import { capThrownMessage } from "../runtime/format.ts";
 import type { McpClientLike } from "./types.ts";
 
 export const MCP_PROTOCOL_VERSION = "2024-11-05";

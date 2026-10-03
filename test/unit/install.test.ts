@@ -11,7 +11,7 @@ import {
   installTargetPath,
   RELEASE_TABLE,
   type ReleaseEntry,
-} from "../../extensions/sentrux/install.ts";
+} from "../../extensions/sentrux/runtime/install.ts";
 
 const PAYLOAD = Buffer.from("#!/bin/sh\necho sentrux-0.5.7-test\n");
 const PAYLOAD_SHA = createHash("sha256").update(PAYLOAD).digest("hex");

@@ -30,21 +30,19 @@ paths = ["extensions/sentrux/tools.ts", "extensions/sentrux/commands.ts", "exten
 order = 2
 
 [[layers]]
-name = "runtime"
-paths = [
-  "extensions/sentrux/servers.ts",
-  "extensions/sentrux/mcp-client.ts",
-  "extensions/sentrux/cli.ts",
-  "extensions/sentrux/install.ts",
-  "extensions/sentrux/git.ts",
-  "extensions/sentrux/binary.ts",
-]
+name = "mcp"
+paths = ["extensions/sentrux/mcp/**"]
 order = 3
 
 [[layers]]
-name = "foundation"
-paths = ["extensions/sentrux/process.ts", "extensions/sentrux/format.ts", "extensions/sentrux/config.ts", "extensions/sentrux/types.ts"]
+name = "runtime"
+paths = ["extensions/sentrux/runtime/**"]
 order = 4
+
+[[layers]]
+name = "config"
+paths = ["extensions/sentrux/config.ts"]
+order = 5
 
 [[boundaries]]
 from = "extensions/**"

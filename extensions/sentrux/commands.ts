@@ -1,11 +1,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { findMissingSharedLibraries, NOT_FOUND_MESSAGE, pathExists, resolveBinary, type BinaryStatus } from "./binary.ts";
+import { findMissingSharedLibraries, NOT_FOUND_MESSAGE, pathExists, resolveBinary, type BinaryStatus } from "./runtime/binary.ts";
 import type { SentruxConfig } from "./config.ts";
 import { DEFAULT_CONFIG } from "./config.ts";
-import { ensureTelemetryOptOut, formatUnsupportedPlatformMessage, getReleaseEntry, installBinary, installTargetPath, type InstallBinaryOptions } from "./install.ts";
-import type { McpServerRegistry } from "./servers.ts";
+import { ensureTelemetryOptOut, formatUnsupportedPlatformMessage, getReleaseEntry, installBinary, installTargetPath, type InstallBinaryOptions } from "./runtime/install.ts";
+import type { McpServerRegistry } from "./mcp/servers.ts";
 
 export interface StatusDeps {
   getConfig: () => SentruxConfig | undefined;

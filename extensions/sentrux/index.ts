@@ -1,12 +1,12 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
-import type { BinaryStatus } from "./binary.ts";
-import { resolveBinary, warmupFailureStatus } from "./binary.ts";
+import type { BinaryStatus } from "./runtime/binary.ts";
+import { resolveBinary, warmupFailureStatus } from "./runtime/binary.ts";
 import { registerStatusCommand } from "./commands.ts";
 import { DEFAULT_CONFIG, loadConfig, sentruxChildEnv, type SentruxConfig } from "./config.ts";
-import { McpClient } from "./mcp-client.ts";
+import { McpClient } from "./mcp/mcp-client.ts";
 import { registerNudgeHooks } from "./nudge.ts";
-import { McpServerRegistry } from "./servers.ts";
+import { McpServerRegistry } from "./mcp/servers.ts";
 import { registerCheckRulesTool, registerGateTool, registerInsightsTool, registerScanTool, registerSessionTool } from "./tools.ts";
 
 const CLIENT_VERSION = "0.1.0";

@@ -21,7 +21,7 @@ import {
   type ScanResult,
   type SessionEndResult,
   type TestGapsResult,
-} from "../../extensions/sentrux/format.ts";
+} from "../../extensions/sentrux/runtime/format.ts";
 
 describe("formatUnknownFields", () => {
   it("prints scalar fields not in knownKeys, and skips known/non-scalar fields", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findUntrackedFiles, formatUntrackedWarning } from "../../extensions/sentrux/git.ts";
+import { findUntrackedFiles, formatUntrackedWarning } from "../../extensions/sentrux/runtime/git.ts";
 
 describe("findUntrackedFiles", () => {
   it("passes -c core.fsmonitor=false so a repo config cannot run commands", async () => {

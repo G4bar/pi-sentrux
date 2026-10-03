@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SentruxConfig } from "../../extensions/sentrux/config.ts";
-import { pathExists } from "../../extensions/sentrux/binary.ts";
+import { pathExists } from "../../extensions/sentrux/runtime/binary.ts";
 import { registerCheckRulesTool, registerGateTool, type SentruxToolDeps } from "../../extensions/sentrux/tools.ts";
 import { makeConfig, makeCtx, makeFakePi } from "../helpers.ts";
 

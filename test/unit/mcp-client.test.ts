@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { McpClient, McpToolError, type McpClientOptions } from "../../extensions/sentrux/mcp-client.ts";
+import { McpClient, McpToolError, type McpClientOptions } from "../../extensions/sentrux/mcp/mcp-client.ts";
 
 const FAKE_SENTRUX = join(import.meta.dirname, "..", "fixtures", "fake-sentrux.mjs");
 

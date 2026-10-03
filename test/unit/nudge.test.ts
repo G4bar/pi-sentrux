@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HealthResult, ScanResult } from "../../extensions/sentrux/format.ts";
+import type { HealthResult, ScanResult } from "../../extensions/sentrux/runtime/format.ts";
 import {
   formatNudgeMessage,
   formatNudgeStatus,

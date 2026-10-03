@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { McpClientLike } from "../../extensions/sentrux/types.ts";
-import { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
+import type { McpClientLike } from "../../extensions/sentrux/mcp/types.ts";
+import { McpServerRegistry } from "../../extensions/sentrux/mcp/servers.ts";
 import { makeFakeMcpClient } from "../helpers.ts";
 
 class FakeMcpClient implements McpClientLike {

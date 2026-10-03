@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { BinaryStatus } from "../../extensions/sentrux/binary.ts";
+import type { BinaryStatus } from "../../extensions/sentrux/runtime/binary.ts";
 import { buildStatusReport, type StatusDeps } from "../../extensions/sentrux/commands.ts";
-import type { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
+import type { McpServerRegistry } from "../../extensions/sentrux/mcp/servers.ts";
 
 const FAKE_BINARY_STATUS: BinaryStatus = {
   path: "/fake/sentrux",

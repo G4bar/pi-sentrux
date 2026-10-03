@@ -4,7 +4,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Type } from "typebox";
-import { pathExists, resolveBinary, stderrTail, type BinaryStatus, type ParsedVersion } from "./binary.ts";
+import { pathExists, resolveBinary, stderrTail, type BinaryStatus, type ParsedVersion } from "./runtime/binary.ts";
 import {
   runCheck,
   runGate,
@@ -14,7 +14,7 @@ import {
   type CheckViolation,
   type CliCommand,
   type GateCompareOutcome,
-} from "./cli.ts";
+} from "./runtime/cli.ts";
 import { DEFAULT_CONFIG, sentruxChildEnv, type SentruxConfig } from "./config.ts";
 import {
   buildModelText,
@@ -32,10 +32,10 @@ import {
   type SessionEndResult,
   type SessionStartResult,
   type TestGapsResult,
-} from "./format.ts";
-import { findUntrackedFiles, formatUntrackedWarning } from "./git.ts";
-import type { RunResult } from "./process.ts";
-import type { McpServerRegistry } from "./servers.ts";
+} from "./runtime/format.ts";
+import { findUntrackedFiles, formatUntrackedWarning } from "./runtime/git.ts";
+import type { RunResult } from "./runtime/process.ts";
+import type { McpServerRegistry } from "./mcp/servers.ts";
 
 export interface SentruxToolDeps {
   getConfig: () => SentruxConfig | undefined;

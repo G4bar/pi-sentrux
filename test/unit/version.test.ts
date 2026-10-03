@@ -8,7 +8,7 @@ import {
   parseVersionOutput,
   validateBinary,
   type BinaryLocation,
-} from "../../extensions/sentrux/binary.ts";
+} from "../../extensions/sentrux/runtime/binary.ts";
 
 describe("parseVersionOutput", () => {
   it("parses a plain version", () => {

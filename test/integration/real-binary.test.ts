@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type SentruxConfig } from "../../extensions/sentrux/config.ts";
-import { pathExists } from "../../extensions/sentrux/binary.ts";
+import { pathExists } from "../../extensions/sentrux/runtime/binary.ts";
 import { makeCtx, makeFakePi } from "../helpers.ts";
-import { McpClient } from "../../extensions/sentrux/mcp-client.ts";
-import { McpServerRegistry } from "../../extensions/sentrux/servers.ts";
+import { McpClient } from "../../extensions/sentrux/mcp/mcp-client.ts";
+import { McpServerRegistry } from "../../extensions/sentrux/mcp/servers.ts";
 import {
   registerCheckRulesTool,
   registerGateTool,

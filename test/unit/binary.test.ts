@@ -9,7 +9,7 @@ import {
   formatNotExecutableMessage,
   formatUnparseableVersionMessage,
   validateBinary,
-} from "../../extensions/sentrux/binary.ts";
+} from "../../extensions/sentrux/runtime/binary.ts";
 
 async function makeExecutable(path: string): Promise<void> {
   await writeFile(path, "#!/bin/sh\necho fake\n");
