@@ -44,6 +44,8 @@ export interface McpServerRegistryOptions {
  */
 export class McpServerRegistry {
   private readonly handles = new Map<string, ServerHandle>();
+  /** Clients detached by closeAll whose close() has not settled; still reachable by killAllSync. */
+  private readonly closing = new Set<McpClientLike>();
 
   constructor(private readonly options: McpServerRegistryOptions) {}
 
@@ -126,10 +128,11 @@ export class McpServerRegistry {
   async closeAll(timeoutMs = DEFAULT_CLOSE_ALL_TIMEOUT_MS): Promise<void> {
     const clients = [...this.handles.values()].map((h) => h.client);
     this.handles.clear();
+    for (const c of clients) this.closing.add(c);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        Promise.allSettled(clients.map((c) => c.close())),
+        Promise.allSettled(clients.map((c) => c.close().finally(() => this.closing.delete(c)))),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, timeoutMs);
         }),
@@ -143,6 +146,9 @@ export class McpServerRegistry {
   killAllSync(): void {
     for (const handle of this.handles.values()) {
       handle.client.forceKillSync();
+    }
+    for (const client of this.closing) {
+      client.forceKillSync();
     }
   }
 }

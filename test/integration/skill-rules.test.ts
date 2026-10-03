@@ -84,7 +84,8 @@ describe.skipIf(!SENTRUX_BIN)("skill rules.toml examples (real binary)", () => {
       expect(stdout, `block ${i} must report a rule count and quality`).toMatch(/rules checked/);
       expect(stdout, `block ${i} must report a quality score`).toMatch(/Quality: \d+/);
     }
-  });
+    // Three sequential real-binary checks take ~4.5s, too close to vitest's 5s default.
+  }, 30_000);
 
   it("layers example flags only the higher-order app importing the lower-order core (P0-L)", async () => {
     const text = await readFile(SKILL_PATH, "utf8");

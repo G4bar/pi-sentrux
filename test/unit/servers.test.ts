@@ -147,6 +147,34 @@ describe("McpServerRegistry", () => {
     expect(Date.now() - start).toBeLessThan(1000);
   });
 
+  it("killAllSync still reaches clients whose closeAll close() has not settled", async () => {
+    let forceKills = 0;
+    let finishClose!: () => void;
+    const hangingClient: McpClientLike = {
+      isAlive: true,
+      generation: 0,
+      pid: undefined,
+      start: async () => {},
+      callTool: async () => {
+        throw new Error("not exercised");
+      },
+      close: () => new Promise<void>((resolve) => (finishClose = resolve)),
+      forceKillSync: () => void forceKills++,
+    };
+    const registry = new McpServerRegistry({ maxServers: () => 3, createClient: () => hangingClient });
+    await registry.getClient("/root/hang");
+
+    const closing = registry.closeAll(5000);
+    expect(registry.getHandleInfo("/root/hang")).toBeUndefined();
+    registry.killAllSync();
+    expect(forceKills).toBe(1);
+
+    finishClose();
+    await closing;
+    registry.killAllSync();
+    expect(forceKills).toBe(1);
+  });
+
   it("reports liveness via the alive flag; dead handles stay listed until closed", async () => {
     const { registry, created } = makeRegistry();
     await registry.getClient("/root/a");
