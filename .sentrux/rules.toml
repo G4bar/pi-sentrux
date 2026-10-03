@@ -6,7 +6,7 @@
 # and the leaf modules the highest. Globs: exact paths match exactly; `dir/**` covers a subtree.
 
 [constraints]
-min_quality = 0.60            # 0-1 scale; 0.593 before the arch fixes, 0.637 after phases 1-5. Ratchet up after phase 6.
+min_quality = 0.65            # 0-1 scale; 0.593 before the arch fixes, 0.659 after them. Ratchet up, never down.
 max_cycles = 0
 max_cc = 15                   # applies to tests and fixtures too
 no_god_files = true           # fan-out > 15; current max internal fan-out is 7
